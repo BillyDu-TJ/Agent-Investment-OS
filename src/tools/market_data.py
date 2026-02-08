@@ -28,13 +28,16 @@ class MarketData:
     def __init__(self):
         # [配置区] 你可以在这里随意添加你想监控的标的
         # 格式: "中文名称": "代码"
+        # type 可选: index/stock/etf/fund 等,供后续扩展
         # 注意：东方财富接口的代码通常不需要加 sh/sz 前缀，直接用数字
-        self.TARGETS = {
-            "上证指数": "sh000001",
-            "沪深300": "sh000300", 
-            "创业板指": "sz399006",
-            # "上证50": "000016", # 如果想看，取消注释即可
-        }
+        self.TARGETS = [
+            {"name": "上证指数", "symbol": "sh000001", "type": "index"},
+            {"name": "沪深300", "symbol": "sh000300", "type": "index"},
+            {"name": "创业板指", "symbol": "sz399006", "type": "index"},
+            # 后续你可以直接添加股票或ETF，腾讯接口通用
+            # {"name": "贵州茅台", "symbol": "sh600519", "type": "stock"},
+            # {"name": "纳指ETF", "symbol": "sz159941", "type": "etf"},
+        ]
 
     def calculate_technical_indicators(self, df):
         """
@@ -129,20 +132,25 @@ class MarketData:
             else:
                 analysis_text.append("MACD死叉状态")
 
-            return {
+            # 统一输出字典的 Key，确保 indicators 包含所有计算出的指标
+            res = {
                 "name": name,
                 "symbol": symbol,
                 "date": latest['日期'],
                 "close": float(latest['收盘']),
                 "change_pct": change_pct,
-                "volume_e": round(float(latest['成交量']) / 100000000, 2), # 转为亿
+                "volume_e": round(float(latest['成交量']) / 100000000, 2),
                 "indicators": {
+                    # 自动搜集所有计算出的技术指标
                     "MA20": round(float(latest['MA20']), 2),
+                    "MA200": round(float(latest['MA200']), 2),
                     "RSI": rsi_val,
-                    "MACD": "金叉" if latest['MACD_DIF'] > latest['MACD_DEA'] else "死叉"
+                    "MACD": "金叉" if latest['MACD_DIF'] > latest['MACD_DEA'] else "死叉",
+                    # 如果你以后加了 KDJ，这里会自动带上（前提是在 calculate 里存入了 df）
                 },
                 "signal_summary": ", ".join(analysis_text)
             }
+            return res
 
         except Exception as e:
             logging.error(f"获取 [{name}] 失败: {e}")
@@ -155,9 +163,12 @@ class MarketData:
         循环抓取配置列表中的所有标的
         """
         results = []
-        for name, code in self.TARGETS.items():
-            data = self.get_data_from_tencent(code, name)
+        for target in self.TARGETS:
+            # 这里的 target 是个字典
+            data = self.get_data_from_tencent(target['symbol'], target['name'])
             if data:
+                # 注入元数据 (比如 type)，增强后续分析的灵活性
+                data['type'] = target['type']
                 results.append(data)
         
         return {
