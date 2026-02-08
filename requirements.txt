@@ -1,0 +1,8 @@
+akshare>=1.12.0
+pandas>=2.0.0
+requests>=2.31.0
+openai>=1.10.0
+pyyaml>=6.0
+python-dotenv>=1.0.0
+# plotting (optional for now)
+matplotlib>=3.7.0
