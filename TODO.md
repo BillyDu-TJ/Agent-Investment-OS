@@ -3,7 +3,7 @@
 ## Phase 1: Infrastructure (当前阶段)
 - [x] 初始化项目目录结构
 - [x] 配置 Python 环境与依赖 (`requirements.txt`)
-- [ ] **Task 1:** 实现 `tools/market_data.py`，封装 AkShare 接口，获取大盘核心数据。
+- [x] **Task 1:** 实现 `tools/market_data.py`，封装 AkShare 接口，获取大盘核心数据。
 - [ ] **Task 2:** 实现 `utils/file_handler.py`，测试生成 Markdown 文件并写入 Obsidian 目录。
 
 ## Phase 2: The Brain (LLM Integration)
@@ -14,6 +14,8 @@
 ## Phase 3: The Soul (Expert Knowledge)
 - [ ] 整理专家逻辑数据（CSV/JSON 格式）。
 - [ ] **Task 5:** 实现简单的 RAG (检索增强生成)，让 Agent 回答时参考专家逻辑。
+- [ ] **Task 5 (New):** 实现 `src/tools/portfolio_mgr.py`，能够读取 `portfolio.yaml` 并计算当前持仓的最新市值与盈亏。
+- [ ] **Task 6 (New):** 升级 CIO Agent 的 Prompt 模板，将“当前持仓”作为核心变量传入，开启个性化诊断模式。
 
 ## Phase 4: Automation & Deployment
 - [ ] 编写 `main.py` 主流程脚本。
