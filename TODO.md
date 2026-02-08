@@ -1,9 +1,8 @@
-```markdown
 # 📝 Project Roadmap
 
 ## Phase 1: Infrastructure (当前阶段)
-- [ ] 初始化项目目录结构
-- [ ] 配置 Python 环境与依赖 (`requirements.txt`)
+- [x] 初始化项目目录结构
+- [x] 配置 Python 环境与依赖 (`requirements.txt`)
 - [ ] **Task 1:** 实现 `tools/market_data.py`，封装 AkShare 接口，获取大盘核心数据。
 - [ ] **Task 2:** 实现 `utils/file_handler.py`，测试生成 Markdown 文件并写入 Obsidian 目录。
 
