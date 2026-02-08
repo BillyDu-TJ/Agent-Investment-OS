@@ -12,7 +12,6 @@
 
 ```mermaid
 graph TD
-    graph TD
     subgraph "Perception Layer (感知层)"
         Data[公开行情: AkShare] --> B(Python 数据管道)
         News[宏观新闻: 财经接口] --> B
