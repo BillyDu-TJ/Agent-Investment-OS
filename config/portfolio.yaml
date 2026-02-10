@@ -1,0 +1,21 @@
+# config/portfolio.yaml
+# 用户持仓配置
+
+# 当前可用现金 (人民币)
+cash: 7000
+
+# 持仓列表
+# symbol 必须与 market_data.py 中的代码格式一致 (如 sh000300)
+holdings:
+  - name: "恒生科技ETF"
+    symbol: "sh513130"
+    cost: 0.766    # 持仓成本价
+    shares: 3900       # 持仓份额/股数
+  - name: "软件ETF"
+    symbol: "sz159852"
+    cost: 1.029
+    shares: 2400
+  - name: "券商ETF"
+    symbol: "sh512000"
+    cost: 0.595
+    shares: 4800

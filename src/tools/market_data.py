@@ -34,10 +34,36 @@ class MarketData:
             {"name": "上证指数", "symbol": "sh000001", "type": "index"},
             {"name": "沪深300", "symbol": "sh000300", "type": "index"},
             {"name": "创业板指", "symbol": "sz399006", "type": "index"},
+            # {"name": "恒生科技ETF", "symbol": "sh513130", "type": "etf"},
+            # {"name": "软件ETF", "symbol": "sh159852", "type": "etf"},
+            # {"name": "券商ETF", "symbol": "sh512000", "type": "etf"}
             # 后续你可以直接添加股票或ETF，腾讯接口通用
             # {"name": "贵州茅台", "symbol": "sh600519", "type": "stock"},
             # {"name": "纳指ETF", "symbol": "sz159941", "type": "etf"},
         ]
+
+    def update_targets(self, new_holdings: list):
+        """
+        动态更新监控列表：适配 List[Dict] 结构的 TARGETS
+        """
+        # 获取当前已有的所有 symbol 集合，用于去重检查
+        existing_symbols = {item['symbol'] for item in self.TARGETS}
+        
+        for item in new_holdings:
+            name = item.get('name')
+            symbol = item.get('symbol')
+            # 这里的 type 可以标记为 'holding' 以便后续区分指数和个人持仓
+            h_type = item.get('type', 'holding') 
+            
+            if symbol not in existing_symbols:
+                self.TARGETS.append({
+                    "name": name, 
+                    "symbol": symbol, 
+                    "type": h_type
+                })
+                existing_symbols.add(symbol) # 防止 new_holdings 内部有重复
+                logging.info(f"已动态添加持仓监控标的: {name} ({symbol})")
+
 
     def calculate_technical_indicators(self, df):
         """

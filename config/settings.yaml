@@ -1,0 +1,3 @@
+# config/settings.yaml
+api_key: "sk-a8e28b168f0a4af7bee500a2af5c6a28"
+base_url: "https://api.deepseek.com"
