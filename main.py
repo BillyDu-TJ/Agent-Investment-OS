@@ -5,10 +5,11 @@ import yaml
 import logging
 from datetime import datetime
 from src.tools.market_data import MarketData
-from src.utils.report_gen import ReportGenerator  # 找回 Phase 1 的报告生成器
+from src.utils.report_gen import ReportGenerator
 from src.tools.portfolio_manager import PortfolioManager
 from src.tools.news_mock import get_macro_news
 from src.core.advisor import InvestmentAdvisor
+from src.core.regime import RegimeIdentifier
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -40,7 +41,6 @@ def run_investment_agent():
         return
 
     # 4. 生成数据摘要日报 (Phase 1 Report)
-    # 定义想要在表格中展示的列
     MY_REPORT_COLUMNS = [
         ("名称", "name"),
         ("价格", "close"),
@@ -53,13 +53,28 @@ def run_investment_agent():
     brief_path = data_reporter.generate_daily_report(indices_data, MY_REPORT_COLUMNS)
     logging.info(f"📊 事实简报已生成: {brief_path}")
 
-    # 5. 计算实时持仓与盈亏 (Phase 2 Task 1)
+    # 5. 计算实时持仓与盈亏 (Phase 2 Task 1/2)
+    # 包含 Phase 2.5 新增的 strategy, term 等意图标签
     portfolio_status = portfolio_mgr.get_portfolio_status(indices_data)
 
     # 6. 获取宏观新闻 (Phase 2 Task 2)
     macro_news = get_macro_news()
 
-    # 7. 调用硅基大脑进行深度分析 (Phase 2 Task 3)
+    # 7. 获取当前市场体制信息 (Phase 2.5 Task 3)
+    # 我们通常以上证指数 (sh000001) 作为大盘体制的判断基准
+    regime_tool = RegimeIdentifier()
+    # 假设 collector.last_dfs 已经保存了抓取过程中的 DataFrame
+    benchmark_symbol = "sh000001"
+    index_df = collector.last_dfs.get(benchmark_symbol)
+    
+    if index_df is not None:
+        regime_info = regime_tool.identify(index_df)
+        logging.info(f"时段体制识别完成: {regime_info[0]}")
+    else:
+        regime_info = ("Unknown", "未能获取大盘指数数据，无法识别体制")
+        logging.warning("未能获取上证指数 DataFrame，体制识别失效")
+
+    # 8. 调用硅基大脑进行深度分析 (Phase 2.5 Task 4)
     advisor = InvestmentAdvisor(
         api_key=settings['api_key'], 
         base_url=settings.get('base_url', "https://api.deepseek.com")
@@ -68,10 +83,11 @@ def run_investment_agent():
     ai_analysis = advisor.analyze(
         market_data=indices_data,
         portfolio_data=portfolio_status,
-        macro_news=macro_news
+        macro_news=macro_news,
+        regime_info=regime_info # 传入体制信息
     )
 
-    # 8. 保存 AI 决策报告 (Phase 2 Report)
+    # 9. 保存 AI 决策报告 (Phase 2 Report)
     ai_report_path = f"reports/{today_str}_AI_Advisor.md"
     with open(ai_report_path, "w", encoding="utf-8") as f:
         f.write(ai_analysis)
@@ -84,7 +100,8 @@ def run_investment_agent():
     
     # 预览 AI 建议
     print("\n--- AI 投资建议预览 ---")
-    print(ai_analysis[:500] + "...\n(更多详见报告文件)")
+    # 打印前 600 个字符
+    print(ai_analysis[:600] + "...\n(更多详见报告文件)")
 
 if __name__ == "__main__":
     if not os.path.exists("reports"):

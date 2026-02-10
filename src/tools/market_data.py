@@ -41,6 +41,7 @@ class MarketData:
             # {"name": "贵州茅台", "symbol": "sh600519", "type": "stock"},
             # {"name": "纳指ETF", "symbol": "sz159941", "type": "etf"},
         ]
+        self.last_dfs = {}  # 缓存最近的 DataFrame 数据
 
     def update_targets(self, new_holdings: list):
         """
@@ -71,6 +72,7 @@ class MarketData:
         """
         # 1. 移动平均线 (Trend)
         df['MA20'] = df['收盘'].rolling(window=20).mean()
+        df['MA60'] = df['收盘'].rolling(window=60).mean()
         df['MA200'] = df['收盘'].rolling(window=200).mean()
 
         # 2. RSI 相对强弱指标 (Momentum) - 标准 Wilder's 算法
@@ -126,6 +128,9 @@ class MarketData:
             
             # 计算技术指标 - 修复：确保调用正确的函数名
             df = self.calculate_technical_indicators(df)
+
+            # 将df存入self.last_dfs以备后续使用
+            self.last_dfs[symbol] = df
             
             # 获取最新数据
             latest = df.iloc[-1]

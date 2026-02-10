@@ -6,16 +6,29 @@ cash: 7000
 
 # 持仓列表
 # symbol 必须与 market_data.py 中的代码格式一致 (如 sh000300)
+# strategy 选项: dca (定投) | value (价值) | swing (波段)
+# term 选项: short (短线) | mid (中线) | long (长线)
 holdings:
   - name: "恒生科技ETF"
     symbol: "sh513130"
     cost: 0.766    # 持仓成本价
     shares: 3900       # 持仓份额/股数
+    strategy: "dca"   # 定投策略
+    term: "long"      # 长线持有
+    reason: "看好港股科技板块超跌后的估值修复，作为底仓配置"
+
   - name: "软件ETF"
     symbol: "sz159852"
     cost: 1.029
     shares: 2400
+    strategy: "swing" # 波段策略
+    term: "short"     # 短线操作
+    reason: "博弈国产替代政策利好及AI概念热度"
+    
   - name: "券商ETF"
     symbol: "sh512000"
     cost: 0.595
     shares: 4800
+    strategy: "value" # 价值投资
+    term: "mid"       # 中线持有
+    reason: "博弈大盘反转及牛市旗手属性"
