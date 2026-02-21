@@ -14,10 +14,10 @@
 
 ## 🚧 Phase 2.5: Strategy Refinement (策略精细化) - [当前重点]
 > 目标：让 AI 听懂“定投”和“止损”的区别，并能识别牛熊。
-- [ ] **Task 2.1:** 更新 `config/portfolio.yaml` 结构，增加 `strategy` (策略) 和 `term` (周期) 字段。
-- [ ] **Task 2.2:** 修改 `portfolio_manager.py`，使其读取并传递这些新标签。
-- [ ] **Task 2.3:** 在 `src/core/` 下新建 `regime.py`，实现简单的市场体制判断逻辑（如基于均线系统的 Bull/Bear/Chop）。
-- [ ] **Task 2.4:** **重构 System Prompt**，注入“资产意图”和“市场体制”逻辑，测试 AI 是否能对不同资产给出差异化建议。
+- [x] **Task 2.1:** 更新 `config/portfolio.yaml` 结构，增加 `strategy` (策略) 和 `term` (周期) 字段。
+- [x] **Task 2.2:** 修改 `portfolio_manager.py`，使其读取并传递这些新标签。
+- [x] **Task 2.3:** 在 `src/core/` 下新建 `regime.py`，实现简单的市场体制判断逻辑（如基于均线系统的 Bull/Bear/Chop）。
+- [x] **Task 2.4:** **重构 System Prompt**，注入“资产意图”和“市场体制”逻辑，测试 AI 是否能对不同资产给出差异化建议。
 
 ## 📅 Phase 3: The Reality Interface (真实世界接入)
 > 目标：移除 Mock 数据，接入真实信息流与专家知识。
