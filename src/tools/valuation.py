@@ -51,16 +51,17 @@ class ValuationManager:
 
     def _get_index_valuation(self, track_index: str) -> Dict:
         """引擎 1：获取指数估值 (中证官网)"""
-        # 清洗可能带有的字母前缀 (如 sh000300 -> 000300)
         clean_code = ''.join(filter(str.isdigit, str(track_index)))
-        res = {'pe': None, 'pb': None, 'dividend_yield': None, 'type': '指数'}
+        res = {'pe': None, 'pb': None, 'dividend_yield': None, 'date': None, 'type': '指数'}
         try:
             df = ak.stock_zh_index_value_csindex(symbol=clean_code)
-            if df is not None and not df.empty:
+            if df is not None and not pd.to_datetime(df['日期']).empty:
+                # 统一回归到最稳健的 市盈率1 (静态/动态口径)
                 res['pe'] = float(df['市盈率1'].iloc[-1])
                 res['dividend_yield'] = float(df['股息率1'].iloc[-1])
+                res['date'] = str(df['日期'].iloc[-1]) # 记录数据日期，提醒 AI 时效性
         except Exception as e:
-            logger.debug(f"[Valuation] 指数 {track_index} 估值获取失败(可能是跨市场或接口异常): {e}")
+            logger.debug(f"[Valuation] 指数 {track_index} 估值获取失败: {e}")
         return res
 
     def _get_stock_valuation(self, symbol: str) -> Dict:
