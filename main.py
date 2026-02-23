@@ -61,7 +61,9 @@ def run_investment_agent():
         ("PE(估值)", "valuation.pe"),     
         ("PB(市净)", "valuation.pb"),     
         ("RSI", "indicators.RSI"),
-        ("MACD", "indicators.MACD")]
+        ("MACD", "indicators.MACD"),
+        ("量比", "indicators.Vol_Ratio"),   
+        ("布林带", "indicators.Bollinger")]
     data_reporter = ReportGenerator(output_dir="reports")
     brief_path = data_reporter.generate_daily_report(indices_data, MY_REPORT_COLUMNS)
 

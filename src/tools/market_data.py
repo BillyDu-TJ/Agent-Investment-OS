@@ -59,16 +59,16 @@ class MarketData:
             if symbol not in existing_symbols:
                 self.TARGETS.append({
                     "name": name, 
-                    "symbol": symbol, 
+                    "symbol": str(symbol), # 确保为字符串以兼容场外基金
                     "type": h_type
                 })
                 existing_symbols.add(symbol) # 防止 new_holdings 内部有重复
-                logging.info(f"已动态添加持仓监控标的: {name} ({symbol})")
+                logging.info(f"已动态添加持仓监控标的: {name} ({symbol}) - 资产类型: {h_type}")
 
 
-    def calculate_technical_indicators(self, df):
+    def calculate_technical_indicators(self, df, has_volume=True):
         """
-        计算核心技术指标：MA, RSI, MACD
+        计算核心技术指标：MA, RSI, MACD (新增 Bollinger 与 Volume)
         """
         # 1. 移动平均线 (Trend)
         df['MA20'] = df['收盘'].rolling(window=20).mean()
@@ -89,6 +89,17 @@ class MarketData:
         df['MACD_DEA'] = df['MACD_DIF'].ewm(span=9, adjust=False).mean()
         df['MACD'] = 2 * (df['MACD_DIF'] - df['MACD_DEA'])
         
+        # === [Task B 新增: 布林带 (Bollinger Bands)] ===
+        df['BB_STD'] = df['收盘'].rolling(window=20).std()
+        df['BB_UP'] = df['MA20'] + 2 * df['BB_STD']
+        df['BB_LOW'] = df['MA20'] - 2 * df['BB_STD']
+
+        # === [Task B 新增: 量能 MA5] ===
+        if has_volume and '成交量' in df.columns:
+            df['VOL_MA5'] = df['成交量'].rolling(window=5).mean()
+        else:
+            df['VOL_MA5'] = pd.NA
+
         return df
 
     def get_data_from_tencent(self, symbol, name):
@@ -96,18 +107,15 @@ class MarketData:
         使用腾讯接口获取数据
         """
         try:
-            logging.info(f"正在获取 [{name}] ({symbol})...")
+            logging.info(f"正在获取场内标的 [{name}] ({symbol})...")
             
             # 调用腾讯接口
             df = ak.stock_zh_index_daily_tx(symbol=symbol)
             
-            if df.empty:
+            if df is None or df.empty:
                 logging.warning(f"[{name}] 数据为空,请检查代码是否正确。")
                 return None
 
-            # 打印原始列名以便调试
-            # logging.info(f"原始列名: {df.columns.tolist()}")
-            
             # 重命名列为中文标准格式
             # 修复核心：腾讯接口返回的是 amount (成交额)，将其映射为 '成交量' 以匹配后续逻辑
             column_mapping = {
@@ -126,8 +134,8 @@ class MarketData:
             # 过滤最近2年的数据
             df = df[df['日期'] >= '2023-01-01']
             
-            # 计算技术指标 - 修复：确保调用正确的函数名
-            df = self.calculate_technical_indicators(df)
+            # 计算技术指标
+            df = self.calculate_technical_indicators(df, has_volume=True)
 
             # 将df存入self.last_dfs以备后续使用
             self.last_dfs[symbol] = df
@@ -163,7 +171,20 @@ class MarketData:
             else:
                 analysis_text.append("MACD死叉状态")
 
-            # 统一输出字典的 Key，确保 indicators 包含所有计算出的指标
+            # === [Task B 新增: 布林带极值与量能异动感知] ===
+            if latest['收盘'] >= latest['BB_UP']:
+                analysis_text.append("触及布林上轨(极端高位)")
+            elif latest['收盘'] <= latest['BB_LOW']:
+                analysis_text.append("触及布林下轨(极端低位)")
+
+            if pd.notna(latest.get('VOL_MA5')):
+                vol_ratio = latest['成交量'] / latest['VOL_MA5']
+                if vol_ratio > 1.5:
+                    analysis_text.append(f"放量({'上涨' if change_pct > 0 else '下跌'},量比{round(vol_ratio,1)})")
+                elif vol_ratio < 0.6:
+                    analysis_text.append(f"极致缩量(量比{round(vol_ratio,1)})")
+
+            # 统一输出字典的 Key
             res = {
                 "name": name,
                 "symbol": symbol,
@@ -172,12 +193,13 @@ class MarketData:
                 "change_pct": change_pct,
                 "volume_e": round(float(latest['成交量']) / 100000000, 2),
                 "indicators": {
-                    # 自动搜集所有计算出的技术指标
                     "MA20": round(float(latest['MA20']), 2),
                     "MA200": round(float(latest['MA200']), 2),
                     "RSI": rsi_val,
                     "MACD": "金叉" if latest['MACD_DIF'] > latest['MACD_DEA'] else "死叉",
-                    # 如果你以后加了 KDJ，这里会自动带上（前提是在 calculate 里存入了 df）
+                    # === [Task B 新增输出] ===
+                    "Bollinger": "Upper" if latest['收盘'] >= latest['BB_UP'] else ("Lower" if latest['收盘'] <= latest['BB_LOW'] else "Mid"),
+                    "Vol_Ratio": round(latest['成交量'] / latest['VOL_MA5'], 2) if pd.notna(latest.get('VOL_MA5')) else "N/A"
                 },
                 "signal_summary": ", ".join(analysis_text)
             }
@@ -185,35 +207,87 @@ class MarketData:
 
         except Exception as e:
             logging.error(f"获取 [{name}] 失败: {e}")
-            # import traceback
-            # traceback.print_exc()
+            return None
+
+    def get_otc_fund_data(self, symbol, name):
+        """
+        使用天天基金接口获取数据 (仅适用于: 场外公募基金, 支付宝基金等)
+        特征: 只有单位净值，无成交量，仅看均线，不看 MACD/RSI/Bollinger
+        """
+        try:
+            logging.info(f"正在获取场外基金 [{name}] ({symbol})...")
+            df = ak.fund_open_fund_info_em(symbol=symbol, indicator="单位净值走势")
+            
+            if df is None or df.empty:
+                logging.warning(f"[{name}] 数据为空,请检查基金代码是否为纯数字 6 位。")
+                return None
+
+            df.rename(columns={'净值日期': '日期', '单位净值': '收盘'}, inplace=True)
+            df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
+            df = df[df['日期'] >= '2023-01-01']
+            
+            df['MA20'] = df['收盘'].rolling(window=20).mean()
+            df['MA60'] = df['收盘'].rolling(window=60).mean()
+            df['MA200'] = df['收盘'].rolling(window=200).mean()
+            
+            self.last_dfs[symbol] = df
+            
+            latest = df.iloc[-1]
+            prev = df.iloc[-2]
+
+            change_pct = round((float(latest['收盘']) - float(prev['收盘'])) / float(prev['收盘']) * 100, 2)
+
+            analysis_text = []
+            if pd.notna(latest['MA20']):
+                if latest['收盘'] > latest['MA20']:
+                    analysis_text.append("净值站上20日线(趋势向上)")
+                else:
+                    analysis_text.append("净值跌破20日线(趋势向下)")
+            else:
+                analysis_text.append("新基或数据不足无均线")
+
+            res = {
+                "name": name,
+                "symbol": symbol,
+                "date": latest['日期'],
+                "close": round(float(latest['收盘']), 4),
+                "change_pct": change_pct,
+                "volume_e": 0.0,
+                "indicators": {
+                    "MA20": round(float(latest['MA20']), 4) if pd.notna(latest['MA20']) else "N/A",
+                    "MA200": round(float(latest['MA200']), 4) if pd.notna(latest['MA200']) else "N/A",
+                    "RSI": "N/A",  
+                    "MACD": "N/A",
+                    # === [Task B 新增：场外基金置空] ===
+                    "Bollinger": "N/A",
+                    "Vol_Ratio": "N/A"
+                },
+                "signal_summary": ", ".join(analysis_text)
+            }
+            return res
+
+        except Exception as e:
+            logging.error(f"获取场外基金 [{name}] 失败: {e}")
             return None
 
     def get_market_summary(self):
         """
-        循环抓取配置列表中的所有标的
+        循环抓取配置列表中的所有标的 (含路由分发)
         """
         results = []
         for target in self.TARGETS:
-            # 这里的 target 是个字典
-            data = self.get_data_from_tencent(target['symbol'], target['name'])
+            t_type = target.get('type', 'stock')
+            
+            if t_type == 'otc_fund':
+                data = self.get_otc_fund_data(target['symbol'], target['name'])
+            else:
+                data = self.get_data_from_tencent(target['symbol'], target['name'])
+                
             if data:
-                # 注入元数据 (比如 type)，增强后续分析的灵活性
-                data['type'] = target['type']
+                data['type'] = t_type
                 results.append(data)
         
         return {
             "summary_date": datetime.now().strftime("%Y-%m-%d"),
             "indices": results
         }
-
-# --- 测试运行 ---
-if __name__ == "__main__":
-    provider = MarketData()
-    data = provider.get_market_summary()
-    
-    import json
-    print("\n" + "="*40)
-    print("数据获取结果 (包含 RSI/MACD):")
-    print("="*40)
-    print(json.dumps(data, indent=4, ensure_ascii=False))
