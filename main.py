@@ -94,6 +94,33 @@ def run_investment_agent():
     logging.info(f"✅ 全流程完成！事实简报: {brief_path} | 决策报告: {ai_report_path}")
     logging.info("=" * 50)
 
+     # === [Task C 新增: 启动 CLI 交互式对话] ===
+    print("\n" + "*" * 50)
+    print("🤖 [私人投资顾问已上线]")
+    print("您可以针对生成的报告自由追问 (例如：'为什么建议减仓软件ETF？' / '能帮我算算目前仓位的整体盈亏吗？')")
+    print("*" * 50)
+    
+    while True:
+        try:
+            user_input = input("\n👤 您的追问 (输入 'q' 退出) > ").strip()
+            
+            if user_input.lower() in ['q', 'quit', 'exit']:
+                print("👋 感谢使用，祝您投资顺利！再见。")
+                break
+            
+            if not user_input:
+                continue
+                
+            print("🧠 顾问正在基于底层数据思考...")
+            # 调用 advisor 的上下文追问接口
+            answer = advisor.chat(user_input)
+            print(f"\n🤖 顾问回答:\n{answer}")
+            
+        except KeyboardInterrupt:
+            # 捕获 Ctrl+C 强制退出
+            print("\n👋 强制退出，再见。")
+            break
+
 if __name__ == "__main__":
     if not os.path.exists("reports"): os.makedirs("reports")
     run_investment_agent()

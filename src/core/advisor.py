@@ -12,6 +12,8 @@ class InvestmentAdvisor:
     def __init__(self, api_key, base_url="https://api.deepseek.com"):
         self.client = OpenAI(api_key=api_key, base_url=base_url)
         self.model = "deepseek-chat" 
+        # === [Task C 新增] 对话历史池，用于实现连续追问 ===
+        self.chat_history = [] 
 
     def analyze(self, market_data, portfolio_data, macro_news, regime_info):
         """
@@ -83,17 +85,49 @@ class InvestmentAdvisor:
         {portfolio_data}
         """
 
+        # === [Task C 修改] 将初始指令和数据装入记忆池 ===
+        self.chat_history = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
         try:
             logging.info("正在调动硅基大脑进行 [技术+估值] 双维分析...")
             response = self.client.chat.completions.create(
                 model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+                messages=self.chat_history,
                 temperature=0.2, # 估值分析需要理性，降低随机性
             )
-            return response.choices[0].message.content
+            answer = response.choices[0].message.content
+            
+            # === [Task C 修改] 将生成的报告也存入记忆，让它知道自己刚才说了什么 ===
+            self.chat_history.append({"role": "assistant", "content": answer})
+            
+            return answer
         except Exception as e:
             logging.error(f"硅基大脑连接失败: {e}")
             return "分析失败：大脑连接超时，请检查 API Key 或网络设置。"
+
+    # === [Task C 新增] 交互式追问接口 ===
+    def chat(self, user_query: str) -> str:
+        """
+        基于当前记忆池，回应用户的追问
+        """
+        # 将用户的追问压入记忆池
+        self.chat_history.append({"role": "user", "content": user_query})
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=self.chat_history,
+                temperature=0.4, # 互动交流时稍微提高一点温度，让回答更自然
+            )
+            answer = response.choices[0].message.content
+            
+            # 将助手的回答压入记忆池，实现无限轮对话
+            self.chat_history.append({"role": "assistant", "content": answer})
+            return answer
+        except Exception as e:
+            # 如果出错，把刚才压入的问题弹出来，避免污染历史
+            self.chat_history.pop()
+            return f"思考中断，请重试。错误信息: {e}"
