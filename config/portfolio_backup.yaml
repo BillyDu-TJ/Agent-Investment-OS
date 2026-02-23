@@ -1,0 +1,66 @@
+# config/portfolio.yaml
+# 用户持仓配置
+
+# 当前可用现金 (人民币)
+cash: 7000
+
+# 持仓列表
+# symbol 必须与 market_data.py 中的代码格式一致 (如 sh000300)
+# strategy 选项: dca (定投) | value (价值) | swing (波段)
+# term 选项: short (短线) | mid (中线) | long (长线)
+# track_index 告诉AI这个标的的跟踪指数。个股无需填写，ETF则填写对应的指数代码（如 sh513130 跟踪 987008 恒生科技指数）
+holdings:
+  - name: "恒生科技ETF"
+    symbol: "sh513130"
+    cost: 0.766    # 持仓成本价
+    shares: 3900       # 持仓份额/股数
+    strategy: "value"   # 定投策略
+    term: "long"      # 长线持有
+    track_index: "H30533"    # 跟踪指数：恒生科技指数
+    reason: "看好港股科技板块超跌后的估值修复，作为底仓配置"
+
+  - name: "软件ETF"
+    symbol: "sz159852"
+    cost: 1.029
+    shares: 2400
+    strategy: "swing" # 波段策略
+    term: "short"     # 短线操作
+    track_index: "931071"    # 跟踪指数：中证软件指数
+    reason: "博弈国产替代政策利好及AI概念热度"
+    
+  - name: "券商ETF"
+    symbol: "sh512000"
+    cost: 0.595
+    shares: 4800
+    strategy: "value" # 价值投资
+    term: "mid"       # 中线持有
+    track_index: "399975"    # 跟踪指数：证券公司指数
+    reason: "博弈大盘反转及牛市旗手属性"
+
+  - name: "南方纳指A"
+    symbol: "016452"          # 必须是6位纯数字
+    type: "otc_fund"          # [新增] 必须指定为场外基金，以便系统路由
+    cost: 2.0200               # 您的持仓成本净值
+    shares: 118.81              # 您的持有份额
+    strategy: "dca"
+    term: "long"
+    reason: "纳指长线定投"
+    
+  - name: "华夏红利低波联接A"
+    symbol: "021482"
+    type: "otc_fund"
+    cost: 1.0749
+    shares: 1116.38
+    strategy: "dca"
+    term: "mid"
+    reason: "底仓防御，获取稳定分红"
+
+  - name: "博时黄金C"
+    symbol: "002611"
+    type: "otc_fund"
+    cost: 3.4470    
+    shares: 435.16
+    strategy: "swing"
+    term: "long"       
+    reason: "抗通胀与避险配置"
+ 

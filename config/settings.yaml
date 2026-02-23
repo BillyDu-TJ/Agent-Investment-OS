@@ -1,3 +1,6 @@
 # config/settings.yaml
 api_key: "sk-a8e28b168f0a4af7bee500a2af5c6a28"
 base_url: "https://api.deepseek.com"
+
+# Obsidian 知识库根目录绝对路径 (请确保路径正确，Windows建议用双斜杠或正斜杠)
+obsidian_vault_root: "E:\\投资管理"

@@ -3,57 +3,113 @@
 import os
 import yaml
 import logging
+import csv
 from datetime import datetime
+
 from src.tools.market_data import MarketData
 from src.tools.valuation import ValuationManager
-from src.tools.news_hub import NewsHub          # <--- [修改] 引入真实新闻模块
-from src.utils.report_gen import ReportGenerator
+from src.tools.news_hub import NewsHub
 from src.tools.portfolio_manager import PortfolioManager
+from src.tools.transaction import TransactionManager  # [Task 2] 交易引擎
 from src.core.advisor import InvestmentAdvisor
 from src.core.regime import RegimeIdentifier
+from src.core.memory import ContextLoader            # [Task 1] 记忆引擎
+from src.utils.report_gen import ReportGenerator
+from src.utils.obsidian_sync import ObsidianSyncer   # [Task 3] 知识库同步
 
+# 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def load_settings():
     with open("config/settings.yaml", "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
-def run_investment_agent():
-    logging.info("🚀 [Agent 投资辅助系统] 启动全流程：感知 + 估值 + 决策...")
+def get_recent_trades_summary(csv_path, limit=10):
+    """
+    从 CSV 读取最近 N 笔真实交易记录，喂给 AI
+    让 AI 知道账户的'真实历史动作'，弥补短期记忆的不足。
+    """
+    if not os.path.exists(csv_path):
+        return "暂无历史交易记录。"
+    
+    trades = []
+    try:
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                trades.append(row)
+    except Exception:
+        return "读取交易记录失败。"
 
+    if not trades:
+        return "暂无历史交易记录。"
+
+    # 取最近 limit 条，按时间倒序
+    recent = trades[-limit:]
+    summary = []
+    for t in recent:
+        # 格式: [2026-02-23] BUY sh513130 1000份 @ 0.688
+        summary.append(f"[{t['Date']}] {t['Action']} {t['Symbol']} {t['Shares']}份 @ {t['Price']} (Pnl: {t['Realized_PnL']})")
+    
+    return "\n".join(summary)
+
+def run_investment_agent():
+    logging.info("🚀 [Agentic-Investment-OS] 系统全功能启动...")
+    
+    # 1. 初始化基础设施
     settings = load_settings()
     today_str = datetime.now().strftime("%Y-%m-%d")
     
+    # 初始化各个管理器
     portfolio_mgr = PortfolioManager()
+    trans_mgr = TransactionManager()     # 交易/记账
+    context_loader = ContextLoader()     # 短期记忆
+    obsidian_sync = ObsidianSyncer()     # 知识库同步
+    
     user_holdings = portfolio_mgr.portfolio_data.get('holdings', [])
-
     collector = MarketData()
     collector.update_targets(user_holdings)
-    
-    # 1. 行情与估值采集
+
+    # 2. 感知层：获取多维数据
+    logging.info("📡 正在建立全维市场感知...")
     market_summary = collector.get_market_summary()
     indices_data = market_summary.get('indices', [])
     
+    # 注入估值数据
     val_mgr = ValuationManager()
     for item in indices_data:
         item['valuation'] = val_mgr.get_valuation(item.get('symbol'))
 
-    # 2. [修改] 获取真实宏观新闻
+    # 获取真实新闻
     news_hub = NewsHub()
-    real_news = news_hub.get_recent_news() # 获取最新的 30 条真实新闻
+    real_news = news_hub.get_recent_news()
     
-    # 3. [新增] 生成独立的新闻快讯报告
+    # 获取账户状态 (含自动计算的持仓市值)
+    portfolio_status = portfolio_mgr.get_portfolio_status(indices_data)
+    
+    # 获取市场体制
+    regime_tool = RegimeIdentifier()
+    index_df = collector.last_dfs.get("sh000001") # 默认以上证指数判定大盘体制
+    regime_info = regime_tool.identify(index_df) if index_df is not None else ("Unknown", "未能识别体制")
+
+    # [Task 1] 加载短期记忆 (过去3天的决策)
+    short_term_memory = context_loader.load_history(days=3)
+    
+    # [新增] 加载长期交易历史 (CSV中的真实操作)
+    trade_history_str = get_recent_trades_summary(trans_mgr.csv_path)
+
+    # 3. 输出层：生成各类报告
+    # (A) 新闻快讯
     news_report_path = f"reports/{today_str}_News_Flash.md"
     with open(news_report_path, "w", encoding="utf-8") as f:
         f.write(f"# 📅 财经快讯 - {today_str}\n\n")
         if real_news:
             for i, content in enumerate(real_news, 1):
-                f.write(f"### [{i}] 快讯内容\n{content}\n\n---\n")
+                f.write(f"### [{i}] 快讯\n{content}\n\n---\n")
         else:
             f.write("今日暂无重大实时快讯。")
-    logging.info(f"📰 实时快讯报告已生成: {news_report_path}")
-
-    # 4. 生成事实简报 (技术面)
+    
+    # (B) 每日事实简报 (技术面+估值+量能)
     MY_REPORT_COLUMNS = [
         ("名称", "name"),
         ("价格", "close"),
@@ -62,65 +118,113 @@ def run_investment_agent():
         ("PB(市净)", "valuation.pb"),     
         ("RSI", "indicators.RSI"),
         ("MACD", "indicators.MACD"),
-        ("量比", "indicators.Vol_Ratio"),   
-        ("布林带", "indicators.Bollinger")]
+        ("量比", "indicators.Vol_Ratio"),    
+        ("布林带", "indicators.Bollinger")   
+    ]
     data_reporter = ReportGenerator(output_dir="reports")
     brief_path = data_reporter.generate_daily_report(indices_data, MY_REPORT_COLUMNS)
+    
+    # [Task 3] 同步简报到 Obsidian
+    obsidian_sync.archive_daily_report(brief_path)
 
-    # 5. 体制与持仓分析
-    portfolio_status = portfolio_mgr.get_portfolio_status(indices_data)
-    regime_tool = RegimeIdentifier()
-    index_df = collector.last_dfs.get("sh000001")
-    regime_info = regime_tool.identify(index_df) if index_df is not None else ("Unknown", "未能识别体制")
-
-    # 6. [修改] 调用大脑分析 (传入真实新闻列表)
+    # 4. 决策层：硅基大脑分析
     advisor = InvestmentAdvisor(api_key=settings['api_key'], base_url=settings.get('base_url'))
+    
+    # 将“真实交易历史”注入到 Portfolio 数据块中，让 AI 看到
+    portfolio_context_with_history = f"""
+    {portfolio_status}
+    
+    === 最近真实交易记录 (Reference) ===
+    {trade_history_str}
+    """
+
     ai_analysis = advisor.analyze(
         market_data=indices_data,
-        portfolio_data=portfolio_status,
-        macro_news="\n".join(real_news), # <--- [修改] 将真实新闻列表合并为字符串
-        regime_info=regime_info
+        portfolio_data=portfolio_context_with_history, # 注入了交易历史
+        macro_news="\n".join(real_news),
+        regime_info=regime_info,
+        historical_context=short_term_memory         # 注入了短期记忆
     )
 
-    # 7. 注入新闻到最终报告中 (增强 AI 报告的阅读价值)
+    # 生成最终 AI 报告
     ai_report_path = f"reports/{today_str}_AI_Advisor.md"
     with open(ai_report_path, "w", encoding="utf-8") as f:
-        f.write(f"> ⚠️ 数据时效提示：当前估值参考日期为 {indices_data[-1].get('valuation',{}).get('date', 'Unknown')}\n\n")
+        f.write(f"> ⚠️ 估值数据日期: {indices_data[-1].get('valuation',{}).get('date', 'Unknown')}\n")
+        f.write(f"> 🧠 记忆模块: 已加载最近 3 天决策 + 最近 10 笔真实交易\n\n")
         f.write(ai_analysis)
         f.write("\n\n---\n## 附录：今日参考快讯\n")
-        f.write("\n".join([f"- {n}" for n in real_news[:10]])) # 附带前10条新闻
+        f.write("\n".join([f"- {n}" for n in real_news[:10]]))
+
+    # [Task 3] 同步 AI 报告到 Obsidian
+    obsidian_sync.archive_daily_report(ai_report_path)
 
     logging.info("=" * 50)
-    logging.info(f"✅ 全流程完成！事实简报: {brief_path} | 决策报告: {ai_report_path}")
+    logging.info(f"✅ 核心流程完成。")
+    logging.info(f"📄 简报: {brief_path}")
+    logging.info(f"🧠 决策: {ai_report_path}")
+    if obsidian_sync.is_active:
+        logging.info(f"🔗 Obsidian 同步: 已推送到 {obsidian_sync.dashboard_dir}")
     logging.info("=" * 50)
 
-     # === [Task C 新增: 启动 CLI 交互式对话] ===
-    print("\n" + "*" * 50)
-    print("🤖 [私人投资顾问已上线]")
-    print("您可以针对生成的报告自由追问 (例如：'为什么建议减仓软件ETF？' / '能帮我算算目前仓位的整体盈亏吗？')")
-    print("*" * 50)
+    # 5. [Task 2 & Task 3] 交互式终端 (指令 + 对话)
+    print("\n" + "*" * 60)
+    print("🤖 [Agent 操作系统已就绪]")
+    print("您可以：")
+    print("1. 💬 直接提问 (例如：'结合今天的量能情况，点评一下恒生科技')")
+    print("2. ⚡ 执行交易 (例如：'/buy 016452 1000 1.25' 或 '/deposit 5000')")
+    print("*" * 60)
     
     while True:
         try:
-            user_input = input("\n👤 您的追问 (输入 'q' 退出) > ").strip()
+            user_input = input("\n👤 指令/追问 (q退出) > ").strip()
             
             if user_input.lower() in ['q', 'quit', 'exit']:
-                print("👋 感谢使用，祝您投资顺利！再见。")
+                print("👋 系统关闭。Keep compounded.")
                 break
             
             if not user_input:
                 continue
+            
+            # === [Task 2] 交易指令拦截 ===
+            if user_input.startswith("/"):
+                print("⚡ 正在处理交易指令...")
+                result = trans_mgr.execute_command(user_input)
+                print(result)
                 
-            print("🧠 顾问正在基于底层数据思考...")
-            # 调用 advisor 的上下文追问接口
+                # 如果交易成功（返回包含 ✅），则生成 Obsidian 交易单
+                if "✅" in result:
+                    # 解析简单的动作和标的，用于文件名
+                    try:
+                        parts = user_input.split()
+                        action = parts[0].replace("/", "").upper()
+                        symbol = parts[1] if len(parts) > 1 else "UNKNOWN"
+                        shares = float(parts[2]) if len(parts) > 2 else 0
+                        price = float(parts[3]) if len(parts) > 3 else 0
+                        
+                        # [Task 3] 生成交易单并同步
+                        obsidian_sync.create_trade_journal(
+                            action=action, 
+                            symbol=symbol, 
+                            shares=shares, 
+                            price=price, 
+                            context=f"用户通过终端直接执行。\nAI 最新分析观点参考: {ai_report_path}"
+                        )
+                    except:
+                        pass # 格式解析失败不影响交易结果打印
+                continue
+
+            # === [Task C] 顾问追问模式 ===
+            print("🧠 顾问思考中...")
             answer = advisor.chat(user_input)
             print(f"\n🤖 顾问回答:\n{answer}")
             
         except KeyboardInterrupt:
-            # 捕获 Ctrl+C 强制退出
-            print("\n👋 强制退出，再见。")
+            print("\n👋 强制退出。")
             break
+        except Exception as e:
+            logging.error(f"运行时异常: {e}")
 
 if __name__ == "__main__":
     if not os.path.exists("reports"): os.makedirs("reports")
+    if not os.path.exists("data"): os.makedirs("data")
     run_investment_agent()
