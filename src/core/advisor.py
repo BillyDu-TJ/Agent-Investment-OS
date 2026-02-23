@@ -7,27 +7,26 @@ import json
 class InvestmentAdvisor:
     """
     硅基大脑：负责整合 技术面(Technical) + 估值面(Fundamental) + 消息面(News) 进行多维决策。
+    [Phase 4 升级]: 具备读取历史上下文的能力，保持决策的连贯性。
     """
 
     def __init__(self, api_key, base_url="https://api.deepseek.com"):
         self.client = OpenAI(api_key=api_key, base_url=base_url)
         self.model = "deepseek-chat" 
-        # === [Task C 新增] 对话历史池，用于实现连续追问 ===
         self.chat_history = [] 
 
-    def analyze(self, market_data, portfolio_data, macro_news, regime_info):
+    # === [Task 1 修改] 增加 historical_context 入参 ===
+    def analyze(self, market_data, portfolio_data, macro_news, regime_info, historical_context="无历史记录。"):
         """
         整合多维数据调用 LLM 进行分析
-        market_data: 包含 K线技术指标 AND 估值数据(PE/PB)
         """
 
-        regime_status = regime_info[0]  # Bull / Bear / Shock
+        regime_status = regime_info[0]  
         regime_desc = regime_info[1]
 
-        # 将 market_data 转换为 JSON 字符串，方便 LLM 阅读结构化数据
         market_data_str = json.dumps(market_data, indent=2, ensure_ascii=False)
 
-        # 构建 System Prompt (决策逻辑定义 - V3.0 估值增强版)
+        # 构建 System Prompt (决策逻辑定义)
         system_prompt = f"""
         # Role
         你是一位精通“价值投资”与“趋势跟踪”双重体系的资深基金经理。你不仅看重技术面的买卖点，更看重资产的内生价值（估值安全边际）。
@@ -35,6 +34,11 @@ class InvestmentAdvisor:
         # Context (当前市场体制)
         - 状态: **[{regime_status}]**
         - 描述: {regime_desc}
+
+        # Historical Memory (过去3天的决策连贯性锚点)
+        以下是你过去几天的诊断和决策记录。请你在今天做决策时，务必参考这些记忆。
+        如果过去几天建议“定投加仓”，且今天逻辑未变，请保持连贯；如果发生了趋势逆转，请说明为何改变主意。
+        {historical_context}
 
         # Decision Framework (决策框架)
         请基于以下三个维度进行综合研判（权重：估值40% + 技术40% + 宏观20%）：
@@ -57,9 +61,10 @@ class InvestmentAdvisor:
 
         # Thinking Path (思维链)
         在输出前，请按步骤思考：
-        Step 1: 这个标的现在贵吗？(看 PE/PB) -> 确定安全边际。
-        Step 2: 现在的趋势是向上的吗？(看 MA/MACD) -> 确定入场时机。
-        Step 3: 结合当前的市场体制(Regime)，我应该激进还是保守？
+        Step 1: 记忆比对 -> 今天的技术走势对比昨天是增强了还是恶化了？
+        Step 2: 这个标的现在贵吗？(看 PE/PB) -> 确定安全边际。
+        Step 3: 现在的趋势是向上的吗？(看 MA/MACD) -> 确定入场时机。
+        Step 4: 结合当前的市场体制(Regime)，我应该激进还是保守？
 
         # Output Format
         使用 Markdown 格式，输出一份严谨的投资报告：
@@ -67,11 +72,10 @@ class InvestmentAdvisor:
         2. **【个股/ETF 深度诊断】** (重点)：
            - 逐个分析持仓。
            - **必须明确写出**：当前 PE/PB 水平及其对应的历史位置评价（例如：“当前PE 16.5，位于券商板块历史低位区间...”）。
-           - 结合技术面给出结论。
+           - 结合技术面及【历史记忆】给出结论。
         3. **【操作指令摘要】**：表格或清单形式，给出最终建议（加仓/减仓/持有/观望）。
         """
 
-        # 构建 User Prompt (注入实时数据)
         user_prompt = f"""
         请根据以下多维数据生成今日决策：
 
@@ -85,22 +89,20 @@ class InvestmentAdvisor:
         {portfolio_data}
         """
 
-        # === [Task C 修改] 将初始指令和数据装入记忆池 ===
         self.chat_history = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
 
         try:
-            logging.info("正在调动硅基大脑进行 [技术+估值] 双维分析...")
+            logging.info("正在调动硅基大脑进行 [记忆+技术+估值] 全维分析...")
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=self.chat_history,
-                temperature=0.2, # 估值分析需要理性，降低随机性
+                temperature=0.2, 
             )
             answer = response.choices[0].message.content
             
-            # === [Task C 修改] 将生成的报告也存入记忆，让它知道自己刚才说了什么 ===
             self.chat_history.append({"role": "assistant", "content": answer})
             
             return answer
@@ -108,26 +110,20 @@ class InvestmentAdvisor:
             logging.error(f"硅基大脑连接失败: {e}")
             return "分析失败：大脑连接超时，请检查 API Key 或网络设置。"
 
-    # === [Task C 新增] 交互式追问接口 ===
     def chat(self, user_query: str) -> str:
         """
         基于当前记忆池，回应用户的追问
         """
-        # 将用户的追问压入记忆池
         self.chat_history.append({"role": "user", "content": user_query})
-        
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=self.chat_history,
-                temperature=0.4, # 互动交流时稍微提高一点温度，让回答更自然
+                temperature=0.4, 
             )
             answer = response.choices[0].message.content
-            
-            # 将助手的回答压入记忆池，实现无限轮对话
             self.chat_history.append({"role": "assistant", "content": answer})
             return answer
         except Exception as e:
-            # 如果出错，把刚才压入的问题弹出来，避免污染历史
             self.chat_history.pop()
             return f"思考中断，请重试。错误信息: {e}"
