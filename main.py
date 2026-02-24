@@ -128,7 +128,11 @@ def run_investment_agent():
     obsidian_sync.archive_daily_report(brief_path)
 
     # 4. 决策层：硅基大脑分析
-    advisor = InvestmentAdvisor(api_key=settings['api_key'], base_url=settings.get('base_url'))
+    advisor = InvestmentAdvisor(
+        api_key=settings['api_key'], 
+        base_url=settings.get('base_url'),
+        proxy_config=settings.get('proxy')  # [Phase 4.5] 透传代理配置
+    )
     
     # 将“真实交易历史”注入到 Portfolio 数据块中，让 AI 看到
     portfolio_context_with_history = f"""

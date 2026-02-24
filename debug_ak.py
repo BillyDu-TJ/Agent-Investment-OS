@@ -1,84 +1,97 @@
-# test_market_api.py
+# tests/test_tencent_us.py
 
-import os
-import sys
-import time
-
-# 1. 环境清理：确保无代理干扰 (排除网络环境误判)
-for proxy_var in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']:
-    if proxy_var in os.environ:
-        del os.environ[proxy_var]
-os.environ['NO_PROXY'] = '*'
-os.environ['no_proxy'] = '*'
-
-import akshare as ak
+import requests
+import logging
 import pandas as pd
+from datetime import datetime
 
-def test_tencent_api():
-    """测试当前报错的腾讯接口"""
-    print("\n[1] 正在诊断原腾讯接口 (ak.stock_zh_index_daily_tx) ...")
-    symbol = "sh000001"
+# 配置日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+
+def parse_tencent_us_data(symbol, response_text):
+    """
+    解析腾讯美股/指数的返回字符串 (修正版)
+    """
     try:
-        start_time = time.time()
-        # 这就是 main.py 中报错的那个函数
-        df = ak.stock_zh_index_daily_tx(symbol=symbol)
+        # 提取引号内容
+        if '="' not in response_text: return None
+        content = response_text.split('="')[1].strip('";\n')
+        parts = content.split('~')
         
-        if df is None or df.empty:
-            print(f"❌ 腾讯接口返回空数据。")
-        else:
-            print(f"✅ 腾讯接口连接成功! (耗时 {time.time()-start_time:.2f}s)")
-            print(f"   数据样例: {df.tail(1).to_dict(orient='records')}")
-            
-    except Exception as e:
-        print(f"❌ 腾讯接口确认不可用。")
-        print(f"   报错详情: {e}")
+        # 针对你提供的日志数据进行精准映射
+        # [1] 名称 (纳斯达克100)
+        # [2] 代码 (.NDX) -> 这里之前代码试图转float导致报错
+        # [3] 最新价 (24708.94)
+        # [31] 涨跌额 (-303.68)
+        # [32] 涨跌幅 (-1.21)
+        
+        # 简单防卫：确保数据长度足够
+        if len(parts) < 33:
+            return None
 
-def test_eastmoney_index():
-    """测试备选：东方财富-指数接口"""
-    print("\n[2] 正在验证备选接口: 东方财富-指数 (ak.stock_zh_index_daily_em) ...")
-    symbol = "sh000001" # 上证指数
+        data = {
+            "symbol": symbol,
+            "name": parts[1],
+            "close": float(parts[3]),
+            "change": float(parts[31]),
+            "pct": float(parts[32]),
+            # 腾讯的时间在 Index 30 (2026-02-23 17:15:59)
+            "timestamp": parts[30]
+        }
+        return data
+    except Exception as e:
+        # 仅打印解析错误的简略信息，避免刷屏
+        logging.warning(f"解析 {symbol} 异常: {e}")
+        return None
+
+def test_tencent_connection():
+    logging.info("🚀 [Fix] 腾讯美股接口解析测试...")
+    
+    # 既然你只需要三大指数，我们重点测这几个
+    targets = [
+        ("us.NDX", "纳斯达克100"), 
+        ("us.INX", "标普500"),
+        ("us.DJI", "道琼斯"),     # 顺便加上道指
+    ]
+    
+    codes = ",".join([t[0] for t in targets])
+    url = f"http://qt.gtimg.cn/q={codes}"
+    
     try:
-        start_time = time.time()
-        # 东财指数通常需要带 sh/sz 前缀
-        df = ak.stock_zh_index_daily_em(symbol=symbol)
-        
-        if df is None or df.empty:
-            print(f"❌ 东财指数接口返回空。")
-        else:
-            print(f"✅ 东财指数接口可用! (耗时 {time.time()-start_time:.2f}s)")
-            print(f"   列名检查: {df.columns.tolist()}")
-            print(f"   数据样例: \n{df.tail(2)}")
-            
-    except Exception as e:
-        print(f"❌ 东财指数接口异常: {e}")
+        resp = requests.get(url, timeout=5)
+        if resp.status_code != 200:
+            logging.error(f"❌ 请求失败: {resp.status_code}")
+            return
 
-def test_eastmoney_stock():
-    """测试备选：东方财富-个股/ETF接口"""
-    print("\n[3] 正在验证备选接口: 东方财富-个股/ETF (ak.stock_zh_a_hist) ...")
-    symbol = "513130" # 恒生科技ETF (注意：东财个股接口通常不需要 sh/sz 前缀)
-    try:
-        start_time = time.time()
-        # 个股接口，使用前复权 (qfq)
-        df = ak.stock_zh_a_hist(symbol=symbol, period="daily", start_date="20240101", adjust="qfq")
+        # 尝试解码 (腾讯可能是 GBK 或 UTF-8)
+        text = resp.content.decode('gbk', errors='ignore')
         
-        if df is None or df.empty:
-            print(f"❌ 东财个股接口返回空。")
+        results = []
+        lines = text.strip().split('\n')
+        for line in lines:
+            if not line: continue
+            for code, name in targets:
+                # 模糊匹配 (us.NDX 可能会变成 v_us_NDX)
+                clean_code = code.replace('.', '_')
+                if clean_code in line:
+                    parsed = parse_tencent_us_data(code, line)
+                    if parsed:
+                        results.append(parsed)
+        
+        if results:
+            df = pd.DataFrame(results)
+            print("\n" + "="*60)
+            print("📊 腾讯全球指数实时行情 (Success)")
+            print("="*60)
+            # 调整列顺序
+            print(df[['name', 'symbol', 'close', 'pct', 'change', 'timestamp']].to_string(index=False))
+            print("\n✅ Step 1 验证完成：我们可以通过腾讯接口稳定获取美股指数。")
         else:
-            print(f"✅ 东财个股接口可用! (耗时 {time.time()-start_time:.2f}s)")
-            print(f"   列名检查: {df.columns.tolist()}")
-            print(f"   数据样例: \n{df.tail(2)}")
+            logging.error("❌ 解析结果依然为空，请检查原始数据。")
+            print(text)
 
     except Exception as e:
-        print(f"❌ 东财个股接口异常: {e}")
+        logging.error(f"❌ 网络或系统异常: {e}")
 
 if __name__ == "__main__":
-    print("="*60)
-    print("🚑 市场数据接口连通性诊断")
-    print("="*60)
-    
-    test_tencent_api()
-    test_eastmoney_index()
-    test_eastmoney_stock()
-    
-    print("\n" + "="*60)
-    print("诊断结束。请根据结果决定是否替换 market_data.py。")
+    test_tencent_connection()

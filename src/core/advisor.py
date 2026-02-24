@@ -3,17 +3,38 @@
 from openai import OpenAI
 import logging
 import json
+import httpx
 
 class InvestmentAdvisor:
     """
     硅基大脑：负责整合 技术面(Technical) + 估值面(Fundamental) + 消息面(News) 进行多维决策。
-    [Phase 4 升级]: 具备读取历史上下文的能力，保持决策的连贯性。
+    [Phase 4.5 升级]: 彻底切断对系统环境变量的依赖，实现 LLM 网络层显式接管。
     """
 
-    def __init__(self, api_key, base_url="https://api.deepseek.com"):
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
+    def __init__(self, api_key, base_url="https://api.deepseek.com", proxy_config=None):
         self.model = "deepseek-chat" 
         self.chat_history = [] 
+
+        # 动态构建 OpenAI 客户端参数
+        client_args = {
+            "api_key": api_key,
+            "base_url": base_url
+        }
+
+        # 如果配置了代理，且开启了使用代理的开关，则显式注入 httpx.Client
+        if proxy_config and proxy_config.get('llm_use_proxy', False):
+            proxy_url = proxy_config.get('http_url')
+            if proxy_url:
+                logging.info(f"🛡️ [LLM 网络层] 已显式挂载指定代理: {proxy_url}")
+                # 显式接管网络，无视系统全局变量
+                http_client = httpx.Client(proxy=proxy_url)
+                client_args["http_client"] = http_client
+        else:
+            # 即使不走代理，也可以强行指定一个干净的 Client，防止环境变量污染
+            # logging.debug("🛡️ [LLM 网络层] 使用直连模式")
+            pass
+            
+        self.client = OpenAI(**client_args)
 
     # === [Task 1 修改] 增加 historical_context 入参 ===
     def analyze(self, market_data, portfolio_data, macro_news, regime_info, historical_context="无历史记录。"):

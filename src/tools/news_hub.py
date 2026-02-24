@@ -7,6 +7,7 @@ import json
 import socket
 from typing import List
 import re
+from src.utils.network import no_proxy_context
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -32,7 +33,8 @@ class NewsHub:
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             }
-            response = requests.get(self.eastmoney_api, headers=headers, timeout=5)
+            with no_proxy_context():
+                response = requests.get(self.eastmoney_api, headers=headers, timeout=10)
             
             if response.status_code == 200:
                 text = response.text
@@ -67,7 +69,10 @@ class NewsHub:
         titles = []
         try:
             logging.info(f"正在尝试连接新浪 RSS...")
-            feed = feedparser.parse(self.rss_source)
+
+            with no_proxy_context():
+                feed = feedparser.parse(self.rss_source)
+                
             if feed.bozo:
                 logging.debug(f"RSS 解析遇到非致命错误: {feed.bozo_exception}")
             
