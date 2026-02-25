@@ -1,97 +1,150 @@
-# tests/test_tencent_us.py
+# tests/test_phase5_logic.py
 
-import requests
+import os
+import yaml
+import json
 import logging
-import pandas as pd
-from datetime import datetime
+from openai import OpenAI
+import httpx
 
-# 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
-def parse_tencent_us_data(symbol, response_text):
-    """
-    解析腾讯美股/指数的返回字符串 (修正版)
-    """
+# ==========================================
+# 1. 极限测试数据构造 (Mock Data)
+# ==========================================
+# 场景：纳指大跌(宏观恶化)，黄金飙升(避险升温)，但恒生科技表面上KDJ超买(诱多陷阱)
+MOCK_MARKET_DATA =[
+    {"name": "纳斯达克100", "symbol": "us.NDX", "type": "us_index", "close": 23500.0, "change_pct": -2.85, 
+     "indicators": {"MA20": 24000.0, "RSI": 35.0, "MACD": "死叉", "Bollinger": "Lower", "K": 15.0, "ATR": 350.5}},
+    {"name": "标普500", "symbol": "us.INX", "type": "us_index", "close": 6500.0, "change_pct": -1.90, 
+     "indicators": {"MA20": 6650.0, "RSI": 40.0, "MACD": "死叉", "Bollinger": "Lower", "K": 22.0, "ATR": 85.0}},
+    {"name": "恒生科技ETF", "symbol": "sh513130", "type": "etf", "close": 0.720, "change_pct": 1.50, 
+     "indicators": {"MA20": 0.680, "RSI": 75.0, "MACD": "金叉", "Bollinger": "Upper", "K": 88.5, "ATR": 0.025}},
+    {"name": "博时黄金C", "symbol": "002611", "type": "otc_fund", "close": 3.850, "change_pct": 2.10, 
+     "indicators": {"MA20": 3.700, "RSI": 82.0, "MACD": "金叉", "Bollinger": "Upper", "K": 91.0, "ATR": 0.040}}
+]
+
+MOCK_PORTFOLIO = {"strategy": "稳健偏长线", "holdings": [{"name": "恒生科技ETF", "weight": "40%"}]}
+
+# ==========================================
+# 2. 蓝军：升级版 Advisor 原型
+# ==========================================
+class Phase5_Advisor:
+    def __init__(self, api_key, base_url, proxy_config):
+        client_args = {"api_key": api_key, "base_url": base_url}
+        if proxy_config and proxy_config.get('llm_use_proxy', False):
+            client_args["http_client"] = httpx.Client(proxy=proxy_config.get('http_url'))
+        self.client = OpenAI(**client_args)
+
+    def analyze(self, market_data):
+        #[Phase 5 核心：宏观跨市场映射与新指标 Prompt]
+        system_prompt = """
+        你是资深基金经理(蓝军)。请基于技术面、估值与【全球宏观共振逻辑】进行分析。
+        
+        【Phase 5 强制逻辑挂载】：
+        1. 跨市场映射：分析港股/科技股时，必须严格比对纳斯达克100(us.NDX)的涨跌。如果纳指暴跌，科技股的上涨大概率是诱多。
+        2. 避险情绪侦测：如果全球指数下跌，而黄金(Gold)逆势大涨并触及布林带上轨，说明全球资金正在疯狂避险(Risk-Off)。
+        3. 极端指标警报：如果 KDJ 的 K 值 > 80 (超买)，即使 MACD 金叉，也不建议追高；ATR 放大的标的意味着波动加剧，需控制仓位。
+        
+        请简要输出：1.大势定调(结合中美+黄金) 2.恒生科技的诊断建议。
+        """
+        logging.info("🧠 [蓝军] Advisor 正在思考...")
+        response = self.client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(market_data, ensure_ascii=False)}
+            ], temperature=0.3
+        )
+        return response.choices[0].message.content
+
+# ==========================================
+# 3. 红军：全新 Risk Officer 原型
+# ==========================================
+class Phase5_RiskOfficer:
+    def __init__(self, api_key, base_url, proxy_config):
+        client_args = {"api_key": api_key, "base_url": base_url}
+        if proxy_config and proxy_config.get('llm_use_proxy', False):
+            client_args["http_client"] = httpx.Client(proxy=proxy_config.get('http_url'))
+        self.client = OpenAI(**client_args)
+
+    def evaluate(self, advisor_report, market_data):
+        system_prompt = """
+        # Role: 首席风控官 (Red Team)
+        你是一个极其悲观、极度厌恶风险的对冲基金风控官。你的天职是【反驳与挑刺】基金经理(Advisor)的乐观或中性建议。
+
+        # Workflow:
+        1. 审查 Advisor 的报告。
+        2. 扫描数据中的致命弱点：例如 KDJ 超买(>80)、ATR 波动率剧增、均线偏离度过大、美股宏观负面溢出。
+        3. 无论 Advisor 怎么说，你都要找出不买/减仓的理由。
+
+        # Output Format:
+        必须使用 Markdown 且严格包含以下三个标题：
+        ### ⚠️ 风险点挖掘
+        (指出 KDJ/ATR/布林带等技术面被忽略的隐患)
+        ### 🌍 宏观干扰
+        (强制联系纳指暴跌、黄金避险对目标标的的负面影响)
+        ### 🛑 一票否决理由
+        (给出 1-2 条强烈建议观望或减仓的毒舌理由)
+        """
+        logging.info("🦅 [红军] Risk Officer 正在审查报告并寻找漏洞...")
+        response = self.client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"【市场数据】\n{json.dumps(market_data, ensure_ascii=False)}\n\n【Advisor 初版报告】\n{advisor_report}"}
+            ], temperature=0.4
+        )
+        return response.choices[0].message.content
+
+# ==========================================
+# 4. 报告排版分离原型 (UI Refactoring)
+# ==========================================
+def generate_split_tables(market_data):
+    macro_list =[d for d in market_data if d['type'] in ['index', 'us_index']]
+    micro_list =[d for d in market_data if d['type'] in ['etf', 'otc_fund', 'stock']]
+    
+    def render_row(d):
+        k = d['indicators'].get('K', 50)
+        k_str = f"🔥 {k}" if k > 80 else (f"❄️ {k}" if k < 20 else str(k))
+        return f"| {d['name']} | {d['change_pct']}% | {d['indicators'].get('MACD')} | {k_str} | {d['indicators'].get('Bollinger')} |"
+
+    print("\n" + "="*50)
+    print("📊 【表1】全球宏观与宽基阵列")
+    print("| 名称 | 涨跌幅 | MACD | KDJ(K值) | 布林带 |")
+    print("|---|---|---|---|---|")
+    for d in macro_list: print(render_row(d))
+    
+    print("\n📊 【表2】微观持仓与行业资产")
+    print("| 名称 | 涨跌幅 | MACD | KDJ(K值) | 布林带 |")
+    print("|---|---|---|---|---|")
+    for d in micro_list: print(render_row(d))
+    print("="*50 + "\n")
+
+# ==========================================
+# 5. 执行测试流程
+# ==========================================
+def run_test():
+    # 读取配置
     try:
-        # 提取引号内容
-        if '="' not in response_text: return None
-        content = response_text.split('="')[1].strip('";\n')
-        parts = content.split('~')
-        
-        # 针对你提供的日志数据进行精准映射
-        # [1] 名称 (纳斯达克100)
-        # [2] 代码 (.NDX) -> 这里之前代码试图转float导致报错
-        # [3] 最新价 (24708.94)
-        # [31] 涨跌额 (-303.68)
-        # [32] 涨跌幅 (-1.21)
-        
-        # 简单防卫：确保数据长度足够
-        if len(parts) < 33:
-            return None
-
-        data = {
-            "symbol": symbol,
-            "name": parts[1],
-            "close": float(parts[3]),
-            "change": float(parts[31]),
-            "pct": float(parts[32]),
-            # 腾讯的时间在 Index 30 (2026-02-23 17:15:59)
-            "timestamp": parts[30]
-        }
-        return data
+        with open("config/settings.yaml", "r", encoding="utf-8") as f:
+            settings = yaml.safe_load(f)
     except Exception as e:
-        # 仅打印解析错误的简略信息，避免刷屏
-        logging.warning(f"解析 {symbol} 异常: {e}")
-        return None
+        print(f"❌ 无法读取配置文件: {e}")
+        return
 
-def test_tencent_connection():
-    logging.info("🚀 [Fix] 腾讯美股接口解析测试...")
-    
-    # 既然你只需要三大指数，我们重点测这几个
-    targets = [
-        ("us.NDX", "纳斯达克100"), 
-        ("us.INX", "标普500"),
-        ("us.DJI", "道琼斯"),     # 顺便加上道指
-    ]
-    
-    codes = ",".join([t[0] for t in targets])
-    url = f"http://qt.gtimg.cn/q={codes}"
-    
-    try:
-        resp = requests.get(url, timeout=5)
-        if resp.status_code != 200:
-            logging.error(f"❌ 请求失败: {resp.status_code}")
-            return
+    # 1. 展示分离后的UI表单
+    generate_split_tables(MOCK_MARKET_DATA)
 
-        # 尝试解码 (腾讯可能是 GBK 或 UTF-8)
-        text = resp.content.decode('gbk', errors='ignore')
-        
-        results = []
-        lines = text.strip().split('\n')
-        for line in lines:
-            if not line: continue
-            for code, name in targets:
-                # 模糊匹配 (us.NDX 可能会变成 v_us_NDX)
-                clean_code = code.replace('.', '_')
-                if clean_code in line:
-                    parsed = parse_tencent_us_data(code, line)
-                    if parsed:
-                        results.append(parsed)
-        
-        if results:
-            df = pd.DataFrame(results)
-            print("\n" + "="*60)
-            print("📊 腾讯全球指数实时行情 (Success)")
-            print("="*60)
-            # 调整列顺序
-            print(df[['name', 'symbol', 'close', 'pct', 'change', 'timestamp']].to_string(index=False))
-            print("\n✅ Step 1 验证完成：我们可以通过腾讯接口稳定获取美股指数。")
-        else:
-            logging.error("❌ 解析结果依然为空，请检查原始数据。")
-            print(text)
+    # 2. 蓝军出击
+    advisor = Phase5_Advisor(settings['api_key'], settings.get('base_url'), settings.get('proxy'))
+    adv_report = advisor.analyze(MOCK_MARKET_DATA)
+    print("📘 【蓝军 (Advisor) 研报】\n" + adv_report + "\n")
 
-    except Exception as e:
-        logging.error(f"❌ 网络或系统异常: {e}")
+    # 3. 红军审查
+    officer = Phase5_RiskOfficer(settings['api_key'], settings.get('base_url'), settings.get('proxy'))
+    risk_report = officer.evaluate(adv_report, MOCK_MARKET_DATA)
+    print("📕 【红军 (Risk Officer) 审查结论】\n" + risk_report + "\n")
 
 if __name__ == "__main__":
-    test_tencent_connection()
+    run_test()

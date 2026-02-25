@@ -16,6 +16,8 @@ from src.core.regime import RegimeIdentifier
 from src.core.memory import ContextLoader            # [Task 1] 记忆引擎
 from src.utils.report_gen import ReportGenerator
 from src.utils.obsidian_sync import ObsidianSyncer   # [Task 3] 知识库同步
+from src.core.advisor import InvestmentAdvisor
+from src.core.risk_officer import RiskOfficer  # [Phase 5 新增]
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -118,7 +120,9 @@ def run_investment_agent():
         ("PB(市净)", "valuation.pb"),     
         ("RSI", "indicators.RSI"),
         ("MACD", "indicators.MACD"),
-        ("量比", "indicators.Vol_Ratio"),    
+        ("量比", "indicators.Vol_Ratio"),
+        ("KDJ(K值)", "indicators.K"),       # [Phase 5 新增]
+        ("ATR波动", "indicators.ATR"),      # [Phase 5 新增]    
         ("布林带", "indicators.Bollinger")   
     ]
     data_reporter = ReportGenerator(output_dir="reports")
@@ -150,12 +154,25 @@ def run_investment_agent():
         historical_context=short_term_memory         # 注入了短期记忆
     )
 
+    # === [Phase 5 新增] 引入红军风控官进行审查 ===
+    risk_officer = RiskOfficer(
+        api_key=settings['api_key'], 
+        base_url=settings.get('base_url'),
+        proxy_config=settings.get('proxy')
+    )
+    risk_report = risk_officer.evaluate(ai_analysis, indices_data)
+
     # 生成最终 AI 报告
     ai_report_path = f"reports/{today_str}_AI_Advisor.md"
     with open(ai_report_path, "w", encoding="utf-8") as f:
         f.write(f"> ⚠️ 估值数据日期: {indices_data[-1].get('valuation',{}).get('date', 'Unknown')}\n")
         f.write(f"> 🧠 记忆模块: 已加载最近 3 天决策 + 最近 10 笔真实交易\n\n")
+        
         f.write(ai_analysis)
+
+        f.write("\n\n---\n## 🛑 首席风控官 (红军) 审查结论\n")
+        f.write(risk_report)
+        
         f.write("\n\n---\n## 附录：今日参考快讯\n")
         f.write("\n".join([f"- {n}" for n in real_news[:10]]))
 
