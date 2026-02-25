@@ -118,8 +118,8 @@ class MarketData:
 
         return df
 
-    def get_data_from_tencent(self, symbol, name):
-        """[原有逻辑] 使用 AkShare 获取 A股/港股/指数"""
+    def get_data_from_tencent(self, symbol, name, t_type="stock"):
+        """使用 AkShare 获取 A股/港股/指数, 提供复权数据"""
         try:
             # 兼容逻辑：如果是场外基金代码，不走这里
             if symbol.isdigit() and len(symbol) == 6 and not symbol.startswith(('sh', 'sz')):
@@ -127,7 +127,12 @@ class MarketData:
 
             logging.info(f"正在获取国内标的 [{name}] ({symbol})...")
             with no_proxy_context():
-                df = ak.stock_zh_index_daily_tx(symbol=symbol)
+                if t_type == "index":
+                    # 指数无需复权，继续使用原接口
+                    df = ak.stock_zh_index_daily_tx(symbol=symbol)
+                else:
+                    # 个股必须使用前复权 (qfq) 接口，杜绝价格幻觉
+                    df = ak.stock_zh_a_hist_tx(symbol=symbol, start_date="20230101", adjust="qfq")
             
             if df is None or df.empty:
                 return None
@@ -276,6 +281,28 @@ class MarketData:
             "K": round(float(row['K']), 1),
             "ATR": round(float(row['ATR']), 2)
         }
+    
+    def get_macro_metrics(self):
+        """[维度4新增] 获取宏观锚点数据 (美债10Y)"""
+        macro_data = {"us_10y": "N/A", "cn_10y": "N/A"}
+        try:
+            with no_proxy_context():
+                df = ak.bond_zh_us_rate()
+                # 逻辑：查找最近一个非空的美债数据
+                if not df.empty and '美国国债收益率10年' in df.columns:
+                    us_val = df['美国国债收益率10年'].dropna().iloc[-1]
+                    macro_data['us_10y'] = round(float(us_val), 2)
+                
+                # 顺便拿一下中债
+                if not df.empty and '中国国债收益率10年' in df.columns:
+                    cn_val = df['中国国债收益率10年'].dropna().iloc[-1]
+                    macro_data['cn_10y'] = round(float(cn_val), 2)
+                    
+            logging.info(f"宏观数据获取成功: US10Y={macro_data['us_10y']}%")
+        except Exception as e:
+            logging.warning(f"宏观数据获取失败: {e}")
+        
+        return macro_data
 
     def get_market_summary(self):
         """路由分发中心"""
@@ -288,7 +315,7 @@ class MarketData:
             elif t_type == 'us_index': # [新增]
                 data = self.get_us_data_from_tencent(target['symbol'], target['name'])
             else:
-                data = self.get_data_from_tencent(target['symbol'], target['name'])
+                data = self.get_data_from_tencent(target['symbol'], target['name'], t_type)
                 
             if data:
                 data['type'] = t_type

@@ -1,8 +1,8 @@
-cash: 6062.0
+cash: 7051.4
 holdings:
 - name: 恒生科技ETF
   symbol: sh513130
-  cost: 0.7501
+  cost: 0.7466
   shares: 4900.0
   strategy: value
   term: long
@@ -11,7 +11,7 @@ holdings:
 - name: 软件ETF
   symbol: sz159852
   cost: 1.029
-  shares: 2400
+  shares: 1600.0
   strategy: swing
   term: short
   track_index: '931071'
@@ -27,8 +27,8 @@ holdings:
 - name: 南方纳指A
   symbol: '016452'
   type: otc_fund
-  cost: 1.3318
-  shares: 1118.81
+  cost: 2.02
+  shares: 118.81
   strategy: dca
   term: long
   reason: 纳指长线定投

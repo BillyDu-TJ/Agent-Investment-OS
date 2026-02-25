@@ -94,6 +94,39 @@ class ValuationManager:
                 logger.debug(f"[Valuation] 个股 {clean_code} 数据提取失败: {e}")
         return res
 
+    def get_growth_rate(self, symbol: str) -> str:
+        """[维度4新增] 获取个股净利润增速 (用于识别价值陷阱)"""
+        # 1. 过滤非个股
+        if str(symbol).startswith(("us.", "sh000", "sz399")) or len(str(symbol)) < 6:
+            return "N/A"
+            
+        clean_code = ''.join(filter(str.isdigit, str(symbol)))
+        try:
+            with no_proxy_context():
+                # 使用新浪财务摘要接口 (速度快)
+                df = ak.stock_financial_abstract(symbol=clean_code)
+                
+            if df is None or df.empty:
+                return "N/A"
+                
+            # 2. 按行查找逻辑
+            # 寻找 '指标' 列中包含 '净利润' 且包含 '同比' 的行
+            # 注意：列名可能是 '指标' 或 '选项'
+            mask = df.iloc[:, 1].astype(str).str.contains("净利润") & df.iloc[:, 1].astype(str).str.contains("同比")
+            target_rows = df[mask]
+            
+            if not target_rows.empty:
+                # 取第一行（通常是净利润同比增长率）
+                # 取第3列（索引2），通常是最近的一个报告期数据
+                # 列结构预览: [选项, 指标, 20250930, 20250630...]
+                val = target_rows.iloc[0, 2]
+                return f"{val}%"
+                
+        except Exception:
+            pass # 仅仅是辅助数据，失败了不阻断流程
+            
+        return "N/A"
+
     def get_valuation(self, symbol: str) -> Dict:
         """入口"""
         asset_info = self.holdings_config.get(symbol)
