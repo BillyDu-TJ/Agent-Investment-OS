@@ -127,14 +127,22 @@ class TransactionManager:
                     # 成本价不变，计算已实现盈亏
                     realized_pnl = (price - old_cost) * shares
                     
-                    target_holding['shares'] = round(old_shares - shares, 4)
+                    #[Phase 6 核心修复] 0 股剔除逻辑
+                    remaining_shares = round(old_shares - shares, 4)
+                    if remaining_shares <= 0:
+                        portfolio['holdings'].remove(target_holding) # 彻底从账本中剔除
+                        status_msg = "清仓"
+                    else:
+                        target_holding['shares'] = remaining_shares
+                        status_msg = "卖出"
+                    
                     portfolio['cash'] = round(cash + total_value, 2)
                     
                     self._save_portfolio(portfolio)
                     self._log_trade("SELL", symbol, price, shares, total_value, realized_pnl)
                     
                     pnl_str = f"盈利 {realized_pnl:.2f}元 🔴" if realized_pnl >= 0 else f"亏损 {abs(realized_pnl):.2f}元 🟢"
-                    return f"✅ 卖出成功: [{target_holding.get('name')}] {shares} 份 @ {price}。\n💰 获得现金: {total_value:.2f}元。\n🏆 此次操作已实现盈亏: {pnl_str}。"
+                    return f"✅ {status_msg}成功: [{target_holding.get('name')}] {shares} 份 @ {price}。\n💰 获得现金: {total_value:.2f}元。\n🏆 此次操作已实现盈亏: {pnl_str}。"
 
             return f"❌ 未知指令: {action}"
 
@@ -142,6 +150,44 @@ class TransactionManager:
             return "❌ 参数类型错误。份额和价格必须为数字 (例如: /buy sh513130 1000 0.688)。"
         except Exception as e:
             return f"❌ 交易执行发生系统异常: {e}"
+        
+    def sanitize_portfolio(self):
+        """
+        [启动自愈] 检查 YAML 中是否有手动修改导致的 0 股残留。
+        如果有，自动剔除并记录到 CSV，确保 AI 能够感知到这次手动清仓。
+        """
+        portfolio = self._load_portfolio()
+        holdings = portfolio.get('holdings', [])
+        
+        valid_holdings = []
+        cleaned_items = []
+        
+        for h in holdings:
+            # 容错：处理 string 类型的 '0'
+            try:
+                shares = float(h.get('shares', 0))
+            except:
+                shares = 0
+                
+            if shares <= 0:
+                cleaned_items.append(h)
+            else:
+                valid_holdings.append(h)
+        
+        if cleaned_items:
+            # 执行剔除并保存
+            portfolio['holdings'] = valid_holdings
+            self._save_portfolio(portfolio)
+            
+            # 关键：向 CSV 写入操作记录，让 AI 知道
+            for item in cleaned_items:
+                symbol = item.get('symbol', 'UNKNOWN')
+                name = item.get('name', 'UNKNOWN')
+                logging.info(f"🧹 发现手动清仓资产: {name}({symbol})，正在执行账本自愈...")
+                self._log_trade("MANUAL_CLEAR", symbol, 0, 0, 0, 0.0)
+            
+            return True # 返回 True 表示发生了清洗
+        return False
 
 # --- 独立测试入口 ---
 if __name__ == "__main__":

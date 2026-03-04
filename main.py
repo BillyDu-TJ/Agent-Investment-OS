@@ -19,6 +19,8 @@ from src.utils.obsidian_sync import ObsidianSyncer   # [Task 3] 知识库同步
 from src.core.advisor import InvestmentAdvisor
 from src.core.risk_officer import RiskOfficer  # [Phase 5 新增]
 from src.core.cio import CIO  # [Phase 5 新增]
+from src.tools.macro_sentinels import MacroSentinel # [New]
+import json # [New] 用于 debug 打印
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -69,12 +71,19 @@ def run_investment_agent():
     context_loader = ContextLoader()     # 短期记忆
     obsidian_sync = ObsidianSyncer()     # 知识库同步
     
+    # [Phase 6 关键] 启动时自检，识别手动清仓并记录
+    if trans_mgr.sanitize_portfolio():
+        logging.info("✅ 账本自愈完成，已同步手动清仓记录至 AI 记忆。")
+
     user_holdings = portfolio_mgr.portfolio_data.get('holdings', [])
     collector = MarketData()
     collector.update_targets(user_holdings)
 
     # 2. 感知层：获取多维数据
     logging.info("📡 正在建立全维市场感知...")
+    sentinel = MacroSentinel()
+    macro_data = sentinel.get_macro_data()
+    gold_anchor = sentinel.get_gold_anchor() # 强制追踪黄金
     market_summary = collector.get_market_summary()
     macro_metrics = collector.get_macro_metrics()
     us_10y = macro_metrics.get('us_10y', 'N/A')
@@ -93,9 +102,19 @@ def run_investment_agent():
     news_hub = NewsHub()
     real_news = news_hub.get_recent_news()
 
-    # [新增] 将硬核宏观数据插入新闻列表头部，强制 Agent 关注
-    macro_header = f"【全球宏观硬指标】十年期美债收益率: {us_10y}% (若>4.0%则压制成长股估值); 十年期中债: {macro_metrics.get('cn_10y')}%"
-    real_news.insert(0, macro_header)
+    # [Phase 6] 构造宏观上下文并插入新闻头部
+    vix_info = f"VIX恐慌指数: {macro_data.get('vix', 'N/A')}"
+    cnh_info = f"USD/CNH汇率: {macro_data.get('usd_cnh', 'N/A')}"
+    gold_info = f"黄金锚点: {gold_anchor['price']} (涨跌: {gold_anchor['change_pct']}%)" if gold_anchor else "黄金数据不可用"
+    
+    macro_context_block = f"""
+    【全球宏观硬指标 (哨兵监控)】
+    1. {vix_info} (若>30则市场极度恐慌)
+    2. {cnh_info} (若>7.3则人民币承压)
+    3. {gold_info}
+    4. 十年期美债收益率: {us_10y}% (若>4.0%则压制成长股估值)
+    """
+    real_news.insert(0, macro_context_block)
     
     # 获取账户状态 (含自动计算的持仓市值)
     portfolio_status = portfolio_mgr.get_portfolio_status(indices_data)
@@ -105,13 +124,15 @@ def run_investment_agent():
     index_df = collector.last_dfs.get("sh000001") # 默认以上证指数判定大盘体制
     regime_info = regime_tool.identify(index_df) if index_df is not None else ("Unknown", "未能识别体制")
 
-    # [Task 1] 加载短期记忆 (过去3天的决策)
+    # 3. 记忆与决策准备
     short_term_memory = context_loader.load_history(days=3)
-    
-    # [新增] 加载长期交易历史 (CSV中的真实操作)
+    last_consensus = context_loader.load_consensus() # [Phase 6] 加载昨日共识
     trade_history_str = get_recent_trades_summary(trans_mgr.csv_path)
 
-    # 3. 输出层：生成各类报告
+    # 合并记忆上下文
+    full_memory_context = f"{short_term_memory}\n\n=== 昨日 CIO 最终共识 ===\n{last_consensus}"
+
+    # 4. 输出层：生成各类报告
     # (A) 新闻快讯
     news_report_path = f"reports/{today_str}_News_Flash.md"
     with open(news_report_path, "w", encoding="utf-8") as f:
@@ -137,12 +158,13 @@ def run_investment_agent():
         ("布林带", "indicators.Bollinger")   
     ]
     data_reporter = ReportGenerator(output_dir="reports")
-    brief_path = data_reporter.generate_daily_report(indices_data, MY_REPORT_COLUMNS)
+    brief_path = data_reporter.generate_daily_report(indices_data, MY_REPORT_COLUMNS,
+                                                     portfolio_status=portfolio_status)
     
-    # [Task 3] 同步简报到 Obsidian
+    # 同步简报到 Obsidian
     obsidian_sync.archive_daily_report(brief_path)
 
-    # 4. 决策层：硅基大脑分析
+    # 5. 决策层：硅基大脑分析
     advisor = InvestmentAdvisor(
         api_key=settings['api_key'], 
         base_url=settings.get('base_url'),
@@ -165,7 +187,7 @@ def run_investment_agent():
         historical_context=short_term_memory         # 注入了短期记忆
     )
 
-    # === [Phase 5 新增] 引入红军风控官进行审查 ===
+    # 引入红军风控官进行审查
     risk_officer = RiskOfficer(
         api_key=settings['api_key'], 
         base_url=settings.get('base_url'),
@@ -173,7 +195,7 @@ def run_investment_agent():
     )
     risk_report = risk_officer.evaluate(ai_analysis, indices_data)
 
-    # 3. CIO 进行最终决策 (新增)
+    # CIO 进行最终决策
     cio_engine = CIO(
         api_key=settings['api_key'], 
         base_url=settings.get('base_url'),
@@ -181,20 +203,24 @@ def run_investment_agent():
     )
     final_decision = cio_engine.arbitrate(ai_analysis, risk_report, indices_data)
 
+    # [Phase 6] 保存今日共识，供明日参考
+    context_loader.save_consensus(today_str, final_decision)
+
     # 生成最终 AI 报告
     ai_report_path = f"reports/{today_str}_AI_Advisor.md"
+    valid_date = next((item.get('date') for item in indices_data if item.get('date')), today_str)
     with open(ai_report_path, "w", encoding="utf-8") as f:
-        f.write(f"> ⚠️ 估值数据日期: {indices_data[-1].get('valuation',{}).get('date', 'Unknown')}\n")
+        f.write(f"> ⚠️ 数据基准日期: {valid_date}\n")
         f.write(f"> 🧠 记忆模块: 已加载最近 3 天决策 + 最近 10 笔真实交易\n\n")
         
-        f.write(f"## 基金经理看法\n{ai_analysis}\n\n")
+        f.write("## 🧠 CIO 最终决策\n")
+        f.write(final_decision)
+
+        f.write(f"\n\n---\n## 基金经理看法\n")
         f.write(ai_analysis)
 
         f.write("\n\n---\n## 🛑 首席风控官 (红军) 审查结论\n")
         f.write(risk_report)
-
-        f.write("\n\n---\n## 🧠 CIO 最终决策\n")
-        f.write(final_decision)
 
         f.write("\n\n---\n## 附录：今日参考快讯\n")
         f.write("\n".join([f"- {n}" for n in real_news[:10]]))

@@ -8,14 +8,6 @@ holdings:
   term: long
   track_index: H30533
   reason: 看好港股科技板块超跌后的估值修复，作为底仓配置
-- name: 软件ETF
-  symbol: sz159852
-  cost: 1.029
-  shares: 1600.0
-  strategy: swing
-  term: short
-  track_index: '931071'
-  reason: 博弈国产替代政策利好及AI概念热度
 - name: 券商ETF
   symbol: sh512000
   cost: 0.595
@@ -40,11 +32,3 @@ holdings:
   strategy: dca
   term: mid
   reason: 底仓防御，获取稳定分红
-- name: 博时黄金C
-  symbol: '002611'
-  type: otc_fund
-  cost: 3.447
-  shares: 435.16
-  strategy: swing
-  term: long
-  reason: 抗通胀与避险配置
