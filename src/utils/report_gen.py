@@ -39,27 +39,39 @@ class ReportGenerator:
             for _, key_path in col_config:
                 val = self._get_value(item, key_path)
                 
-                # [Phase 5 增强] 数据视觉化渲染
+                # [Phase 6 视觉增强] 数据视觉化渲染 (状态灯映射)
                 if key_path == "change_pct":
                     emoji = "🔴" if isinstance(val, (int, float)) and val >= 0 else "🟢"
                     val = f"{emoji} {val}%" if val != "-" else "-"
+                elif key_path == "indicators.RSI":
+                    try:
+                        r_val = float(val)
+                        if r_val >= 70: val = f"🔥 {r_val}"
+                        elif r_val <= 30: val = f"❄️ {r_val}"
+                        else: val = f"🟢 {r_val}"
+                    except: pass
                 elif key_path == "indicators.K":
                     try:
                         k_val = float(val)
-                        if k_val > 80: val = f"🔥 {k_val}"
-                        elif k_val < 20: val = f"❄️ {k_val}"
+                        if k_val >= 80: val = f"⚠️ {k_val}(超买)"
+                        elif k_val <= 20: val = f"💎 {k_val}(超卖)"
+                        else: val = f"✅ {k_val}"
                     except: pass
+                elif key_path == "indicators.Bollinger":
+                    if val == "Upper": val = "⚠️ 触顶"
+                    elif val == "Lower": val = "💎 触底"
+                    elif val == "Mid": val = "✅ 中轨"
 
                 row_cells.append(str(val))
             lines.append("| " + " | ".join(row_cells) + " |")
         
         return lines
 
-    def generate_daily_report(self, market_data: list, col_config: list) -> str:
+    def generate_daily_report(self, market_data: list, col_config: list, portfolio_status: dict = None) -> str:
         today_str = datetime.now().strftime("%Y-%m-%d")
         file_path = os.path.join(self.output_dir, f"{today_str}_Daily_Brief.md")
 
-        lines = [
+        lines =[
             "---",
             f"date: {today_str}",
             "tags:[投资日报, 自动生成]",
@@ -67,9 +79,32 @@ class ReportGenerator:
             f"# 📈 市场感知日报 ({today_str})\n"
         ]
 
-        # [Phase 5 核心] 数据分流
-        macro_data = [d for d in market_data if d.get('type') in ['index', 'us_index']]
-        micro_data = [d for d in market_data if d.get('type') not in['index', 'us_index']]
+        #[Phase 6 核心] 财务总览 (Financial Overview)
+        if portfolio_status:
+            total_assets = portfolio_status.get('total_assets', 0)
+            cash = portfolio_status.get('cash', 0)
+            cash_pct = round((cash / total_assets) * 100, 2) if total_assets > 0 else 0
+            
+            # 计算持仓总盈亏 (金额估算 = 现值 - 成本总值，或者通过盈亏率反推)
+            total_pnl = sum([h.get('position_value', 0) - (h.get('position_value', 0) / (1 + h.get('profit_loss_ratio', 0)/100)) for h in portfolio_status.get('holdings', [])])
+            pnl_emoji = "🔴" if total_pnl >= 0 else "🟢"
+
+            lines.extend([
+                "## 💰 账户全局概览",
+                f"- **总资产市值**: ¥{total_assets:,.2f}  |  **当前现金占比**: {cash_pct}% (¥{cash:,.2f})",
+                f"- **当前持仓总浮盈/亏**: {pnl_emoji} ¥{total_pnl:,.2f}",
+                "\n### 💼 持仓摘要",
+                "| 标的 | 仓位占比 | 盈亏状况 |",
+                "| :--- | :--- | :--- |"
+            ])
+            for h in portfolio_status.get('holdings',[]):
+                h_pnl_emoji = "🔴" if h.get('profit_loss_ratio', 0) >= 0 else "🟢"
+                lines.append(f"| {h.get('name')} | {h.get('weight_pct', 0)}% | {h_pnl_emoji} {h.get('profit_loss_ratio', 0)}% |")
+            lines.append("\n---\n")
+
+        # 数据分流
+        macro_data = [d for d in market_data if d.get('type') in['index', 'us_index']]
+        micro_data =[d for d in market_data if d.get('type') not in ['index', 'us_index']]
 
         # 渲染双表
         lines.extend(self._render_table(macro_data, col_config, "🌍 全球宏观与宽基阵列"))

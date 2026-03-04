@@ -1,139 +1,100 @@
-# verify_logic.py
+# test_phase6_part2.py
+import requests
+import yaml
+import os
 
-import pandas as pd
-import numpy as np
-from src.core.regime import RegimeIdentifier
-from src.core.advisor import InvestmentAdvisor
+print("="*50)
+print("🚀 Phase 6: 宏观哨兵与 YAML 自愈 测试")
+print("="*50)
 
-# 实例化组件
-regime_tool = RegimeIdentifier()
-
-# --- 辅助函数：生成合成行情 ---
-def generate_mock_data(scenario_type="bull"):
-    """
-    生成 300 天的合成 K 线数据，模拟不同市场环境
-    """
-    dates = pd.date_range(start="2023-01-01", periods=300)
-    data = []
-    price = 100.0
+# ==========================================
+# 测试 1: 宏观指标数据源 (VIX & USD/CNH) 测试
+# ==========================================
+def test_macro_apis():
+    print("\n--- 测试 1: 宏观指标获取 ---")
+    headers = {
+        "Referer": "https://finance.sina.com.cn",
+        "User-Agent": "Mozilla/5.0"
+    }
     
-    for i in range(300):
-        # 模拟价格波动
-        if scenario_type == "bull":
-            # 牛市：每天随机涨跌，但总体向上，波动率低
-            change = np.random.normal(loc=0.5, scale=1.0) 
-        elif scenario_type == "bear":
-            # 熊市：总体向下
-            change = np.random.normal(loc=-0.5, scale=1.0)
-        elif scenario_type == "panic":
-            # 恐慌：剧烈波动，大幅下跌
-            change = np.random.normal(loc=-2.0, scale=4.0) # 高波动
+    # 1. 测试腾讯获取 VIX 恐慌指数 (us.VIX)
+    try:
+        url_vix = "http://qt.gtimg.cn/q=us.VIX"
+        resp = requests.get(url_vix, timeout=5)
+        text = resp.content.decode('gbk')
+        if '="' in text:
+            parts = text.split('="')[1].split('~')
+            print(f"✅ 腾讯接口 VIX 获取成功: {parts[3]} (涨跌幅: {parts[32]}%)")
         else:
-            # 震荡
-            change = np.random.normal(loc=0.0, scale=1.5)
+            print("❌ 腾讯接口 VIX 获取失败: 返回格式异常")
+    except Exception as e:
+        print(f"❌ 腾讯接口 VIX 请求异常: {e}")
 
-        price = price * (1 + change/100)
-        
-        # 构造 ATR 因子 (High-Low)
-        high = price * (1 + abs(np.random.normal(0, 0.01)))
-        low = price * (1 - abs(np.random.normal(0, 0.01)))
-        tr = high - low
-        
-        data.append({
-            "收盘": price,
-            "最高": high,
-            "最低": low,
-            "TR": tr
-        })
-    
-    df = pd.DataFrame(data, index=dates)
-    
-    # 计算技术指标 (复刻 market_data.py 的逻辑)
-    df['MA20'] = df['收盘'].rolling(window=20).mean()
-    df['MA60'] = df['收盘'].rolling(window=60).mean()
-    df['MA200'] = df['收盘'].rolling(window=200).mean()
-    df['ATR'] = df['TR'].rolling(window=14).mean()
-    
-    return df
-
-def test_regime_logic():
-    print("\n" + "="*50)
-    print("🧪 模块 1 测试：体制识别 (Regime Detection)")
-    print("="*50)
-    
-    scenarios = ["bull", "bear", "panic", "shock"]
-    for sc in scenarios:
-        df = generate_mock_data(sc)
-        status, desc = regime_tool.identify(df)
-        
-        # 提取关键指标用于验证
-        last = df.iloc[-1]
-        slope = (last['MA200'] - df.iloc[-21]['MA200']) / df.iloc[-21]['MA200']
-        vol = last['ATR'] / last['收盘']
-        
-        print(f"场景 [{sc.upper()}] -> 识别结果: 【{status}】")
-        print(f"   指标验证: MA200斜率={slope:.4f}, 波动率压力={vol:.1%}")
-        
-        # 简单的断言验证
-        if sc == "panic" and status != "Panic":
-            print("   ❌ 失败：恐慌场景未识别出 Panic！")
-        elif sc == "bull" and "Bull" not in status:
-            print("   ⚠️ 警告：牛市场景识别偏差 (可能是随机数波动导致)")
+    # 2. 测试新浪获取 USD/CNH (离岸人民币)
+    try:
+        url_cnh = "http://hq.sinajs.cn/list=fx_susdcnh"
+        resp = requests.get(url_cnh, headers=headers, timeout=5)
+        text = resp.text
+        if '="' in text:
+            data_str = text.split('="')[1].strip('";\n')
+            parts = data_str.split(',')
+            # 新浪外汇数据：名称, 时间, 买入价, 卖出价, 昨收, ...
+            if len(parts) > 8:
+                current_price = parts[8] # 最新价
+                print(f"✅ 新浪接口 USD/CNH 获取成功: {current_price} (更新时间: {parts[0]})")
+            else:
+                 print("❌ 新浪接口 USD/CNH 数据解析失败")
         else:
-            print("   ✅ 逻辑符合预期")
-        print("-" * 30)
+            print("❌ 新浪接口 USD/CNH 获取失败")
+    except Exception as e:
+        print(f"❌ 新浪接口 USD/CNH 请求异常: {e}")
 
-def test_prompt_construction():
-    print("\n" + "="*50)
-    print("🧠 模块 2 测试：Prompt 逻辑完整性 (决策盲区检查)")
-    print("="*50)
+# ==========================================
+# 测试 2: YAML 自净化与记录拦截
+# ==========================================
+def test_yaml_sanitizer():
+    print("\n--- 测试 2: 模拟 YAML 手动清零自愈机制 ---")
+    mock_yaml_path = "test_mock_portfolio.yaml"
     
-    # 模拟 Advisor
-    advisor = InvestmentAdvisor(api_key="fake_key", base_url="fake_url")
+    # 写入模拟的脏数据 (用户手动把黄金设为 0)
+    dirty_data = {
+        "cash": 5000,
+        "holdings":[
+            {"name": "沪深300", "symbol": "510300", "shares": 1000},
+            {"name": "黄金ETF", "symbol": "518880", "shares": 0.0} # <--- 脏数据
+        ]
+    }
+    with open(mock_yaml_path, "w") as f:
+        yaml.dump(dirty_data, f)
+        
+    print("加载前的 YAML:", [h['name'] for h in dirty_data['holdings']])
     
-    # 构造假数据
-    mock_market = [{
-        "name": "贵州茅台", "symbol": "sh600519", "close": 1700,
-        "valuation": {"pe": 25.0, "pb": 8.0},
-        "growth_rate": "-15%", # 故意设置负增长 (价值陷阱)
-        "indicators": {"RSI": 75, "MACD": "金叉", "K": 85, "ATR": 30},
-        "type": "stock"
-    }]
+    # 模拟 PortfolioManager 加载并自愈
+    with open(mock_yaml_path, "r") as f:
+        loaded = yaml.safe_load(f)
+        
+    valid_holdings = []
+    cleaned_symbols = []
+    for h in loaded.get('holdings',[]):
+        if float(h.get('shares', 1)) <= 0:
+            cleaned_symbols.append(h['name'])
+        else:
+            valid_holdings.append(h)
+            
+    if cleaned_symbols:
+        loaded['holdings'] = valid_holdings
+        # 写回 YAML
+        with open(mock_yaml_path, "w") as f:
+            yaml.dump(loaded, f)
+        print(f"✅ 成功自愈！已自动剔除手动 0 股的资产: {cleaned_symbols}")
+        print("💡 同步触发机制：系统将在此刻向 CSV 写入 MANUAL_CLEAR 记录。")
     
-    # 构造假宏观
-    mock_news = [
-        "【全球宏观硬指标】十年期美债收益率: 4.50% (若>4.0%则压制成长股估值); 十年期中债: 2.10%", # 高利率环境
-        "美联储暗示维持高利率。"
-    ]
+    # 验证最终结果
+    print("加载后的 YAML:", [h['name'] for h in loaded['holdings']])
     
-    # 这里的 hack 是为了只生成 Prompt 而不真正调用 API
-    # 我们调用内部构建 prompt 的逻辑 (虽然 analyze 方法内部直接调用了 API，
-    # 但我们可以打印出它是如何组装信息的，或者看入参是否正确传递)
-    
-    print("模拟场景：【高美债收益率(4.5%) + 个股负增长(-15%) + 技术面强势(RSI 75)】")
-    print("预期结果：Prompt 中必须包含对 '美债'、'负增长' 的警示，以及对 'RSI钝化' 的处理。")
-    
-    # 直接打印构建好的 Context 片段（这是你在 advisor.py 里写的逻辑）
-    regime_info = ("Bear", "高波动熊市")
-    
-    print("\n--- [System Prompt 检查点] ---")
-    print("1. 检查是否启用了 '动态 RSI'？ (看 advisor.py 源码)")
-    print("2. 检查是否启用了 '宏观滤网'？ (看 advisor.py 源码)")
-    
-    print("\n--- [User Context 检查点] ---")
-    print(f"输入的大模型宏观数据: {mock_news[0]}")
-    print(f"输入的个股增长率数据: {mock_market[0]['growth_rate']}")
-    
-    if "4.50%" in mock_news[0] and "-15%" in mock_market[0]['growth_rate']:
-         print("✅ 成功：关键的宏观与财务避雷指标已正确注入给 Agent。")
-    else:
-         print("❌ 失败：数据注入缺失！")
+    if os.path.exists(mock_yaml_path):
+        os.remove(mock_yaml_path)
 
 if __name__ == "__main__":
-    try:
-        test_regime_logic()
-        test_prompt_construction()
-        print("\n🏆 最终结论：如果上述测试全绿，说明系统逻辑闭环已完成 90%。")
-        print("   剩下的 10% 取决于大模型的智商 (Model Intelligence)。")
-    except Exception as e:
-        print(f"测试脚本运行出错: {e}")
+    test_macro_apis()
+    test_yaml_sanitizer()

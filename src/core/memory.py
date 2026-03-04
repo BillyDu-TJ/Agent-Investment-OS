@@ -5,6 +5,7 @@ import glob
 import re
 from datetime import datetime
 import logging
+import json
 
 class ContextLoader:
     """
@@ -100,6 +101,33 @@ class ContextLoader:
             history_texts.append(day_memory)
 
         return "\n".join(history_texts)
+    
+    def save_consensus(self, date_str, content):
+        """保存 CIO 的最终共识摘要 (JSON)"""
+        memory_path = "data/long_term_memory.json"
+        data = {}
+        if os.path.exists(memory_path):
+            try:
+                with open(memory_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            except: pass
+        
+        data['last_update'] = date_str
+        data['consensus'] = content
+        
+        with open(memory_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    def load_consensus(self):
+        """读取上一日的共识"""
+        memory_path = "data/long_term_memory.json"
+        if os.path.exists(memory_path):
+            try:
+                with open(memory_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    return data.get('consensus', '无历史共识。')
+            except: pass
+        return "无历史共识。"
 
 # 测试代码
 if __name__ == "__main__":

@@ -32,11 +32,3 @@ holdings:
   strategy: dca
   term: mid
   reason: 底仓防御，获取稳定分红
-- name: 博时黄金C
-  symbol: '002611'
-  type: otc_fund
-  cost: 3.447
-  shares: 0.0
-  strategy: swing
-  term: long
-  reason: 抗通胀与避险配置

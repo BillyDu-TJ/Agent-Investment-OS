@@ -12,5 +12,5 @@ proxy:
   # 如果 DeepSeek 直连卡顿，可改为 true 并填写地址；
   # 如果电脑开了全局代理但 DeepSeek 是国内站，建议设为 false，代码会强制绕过系统代理。
   llm_use_proxy: false 
-  http_url: "http://127.0.0.1:17890" 
-  https_url: "http://127.0.0.1:17890"
+  http_url: "http://127.0.0.1:7890" 
+  https_url: "http://127.0.0.1:7890"
