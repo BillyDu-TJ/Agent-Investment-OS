@@ -1,4 +1,4 @@
-cash: 7051.4
+cash: 10079.69
 holdings:
 - name: 恒生科技ETF
   symbol: sh513130
@@ -7,19 +7,11 @@ holdings:
   strategy: value
   term: long
   track_index: H30533
-  reason: 看好港股科技板块超跌后的估值修复，作为底仓配置
-- name: 软件ETF
-  symbol: sz159852
-  cost: 1.029
-  shares: 1600.0
-  strategy: swing
-  term: short
-  track_index: '931071'
-  reason: 博弈国产替代政策利好及AI概念热度
+  reason: 减仓50%，等待右侧信号出现再分批买回
 - name: 券商ETF
   symbol: sh512000
   cost: 0.595
-  shares: 4800
+  shares: 4800  
   strategy: value
   term: mid
   track_index: '399975'
@@ -44,7 +36,7 @@ holdings:
   symbol: '002611'
   type: otc_fund
   cost: 3.447
-  shares: 435.16
+  shares: 0.0
   strategy: swing
   term: long
   reason: 抗通胀与避险配置

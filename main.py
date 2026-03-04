@@ -187,14 +187,15 @@ def run_investment_agent():
         f.write(f"> ⚠️ 估值数据日期: {indices_data[-1].get('valuation',{}).get('date', 'Unknown')}\n")
         f.write(f"> 🧠 记忆模块: 已加载最近 3 天决策 + 最近 10 笔真实交易\n\n")
         
-        f.write(f"## 基金经理看法\n{ai_analysis}\n\n")
-        f.write(ai_analysis)
-
-        f.write("\n\n---\n## 🛑 首席风控官 (红军) 审查结论\n")
-        f.write(risk_report)
-
         f.write("\n\n---\n## 🧠 CIO 最终决策\n")
         f.write(final_decision)
+
+
+        f.write(f"## 🔍 基金经理看法\n{ai_analysis}\n\n")
+        f.write(ai_analysis)
+
+        f.write("\n\n---\n## 🛑 首席风控官审查结论\n")
+        f.write(risk_report)
 
         f.write("\n\n---\n## 附录：今日参考快讯\n")
         f.write("\n".join([f"- {n}" for n in real_news[:10]]))
