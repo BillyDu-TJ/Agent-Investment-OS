@@ -1,0 +1,33 @@
+# config/strategy_profile.yaml
+investment_philosophy: >
+  我是一位风险厌恶型的长期投资者，核心资产配置追求长期复利，卫星资产追求短期弹性。
+  交易准则：左侧埋伏右侧加，破位纪律定止损。
+  对于核心资产，可以采用长线定投，左侧策略，接受短期的回撤；
+  对于卫星资产，追求短期的波段收益，右侧策略，必须严格执行止损纪律。
+  决策前提：必须结合估值安全边际（PE/PB）和市场环境（体制）。
+  对于长线标的：跌幅即机会；对于短线博弈标的：保本即天职。
+
+portfolio_structure:
+  core_weight: 0.70
+  satellite_weight: 0.30
+  execution_mode: "confirm" # 可选: "auto" (自动触发下单), "confirm" (仅打印建议等待确认)
+
+dynamic_strategies:
+  core_dca:
+    target_tags: ["纳斯达克", "高股息红利", "黄金"]
+    factors:
+      pe_quantile: -0.8    # 越低越好，权重 0.8
+      dividend_yield: 0.5  # 越高越好，权重 0.5
+      volatility: 0.2      # 越低越好，权重 0.2
+      
+  satellite_momentum:
+    target_tags: ["科技主题", "热点行业"]
+    factors:
+      momentum_slope: 0.6  # 斜率越陡越好
+      volume_ratio: 0.3    # 放量越明显越好
+      kdj_signal: 0.1      # 是否金叉
+      
+risk_governance:
+  max_drawdown_limit: 0.10
+  us10y_yield_threshold: 4.0
+  valuation_hard_stop: 0.85

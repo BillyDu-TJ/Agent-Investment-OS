@@ -1,4 +1,4 @@
-cash: 7051.4
+cash: 9600.2
 holdings:
 - name: 恒生科技ETF
   symbol: sh513130
@@ -11,7 +11,7 @@ holdings:
 - name: 券商ETF
   symbol: sh512000
   cost: 0.595
-  shares: 4800
+  shares: 0
   strategy: value
   term: mid
   track_index: '399975'
