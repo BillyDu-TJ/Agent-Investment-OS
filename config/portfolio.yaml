@@ -8,14 +8,6 @@ holdings:
   term: long
   track_index: H30533
   reason: 看好港股科技板块超跌后的估值修复，作为底仓配置
-- name: 券商ETF
-  symbol: sh512000
-  cost: 0.595
-  shares: 0
-  strategy: value
-  term: mid
-  track_index: '399975'
-  reason: 博弈大盘反转及牛市旗手属性
 - name: 南方纳指A
   symbol: '016452'
   type: otc_fund
