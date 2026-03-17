@@ -5,6 +5,7 @@ import yaml
 import logging
 import csv
 from datetime import datetime
+from openai import OpenAI
 
 from src.tools.market_data import MarketData
 from src.tools.valuation import ValuationManager
@@ -21,6 +22,9 @@ from src.core.risk_officer import RiskOfficer  # [Phase 5 新增]
 from src.core.cio import CIO  # [Phase 5 新增]
 from src.tools.macro_sentinels import MacroSentinel # [New]
 import json # [New] 用于 debug 打印
+from src.core.strategy_parser import PolicyTranslator
+from src.tools.market_hunter import MarketHunter
+from src.core.knowledge_base import ExpertKnowledgeBase
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -124,13 +128,54 @@ def run_investment_agent():
     index_df = collector.last_dfs.get("sh000001") # 默认以上证指数判定大盘体制
     regime_info = regime_tool.identify(index_df) if index_df is not None else ("Unknown", "未能识别体制")
 
+    # =====================================================================
+    #[Phase 7 新增] 策略解析、猎人选股与大师知识库注入
+    # =====================================================================
+    logging.info("🧠 正在启动策略引擎与大师知识库...")
+    
+    # 1. 加载 YAML 策略
+    with open("config/strategy_profile.yaml", "r", encoding="utf-8") as f:
+        strategy_config = yaml.safe_load(f)
+    
+    # 2. 初始化各大脑模块
+    kb = ExpertKnowledgeBase()
+    translator = PolicyTranslator(client=OpenAI(api_key=settings['api_key'], base_url=settings.get('base_url')))
+    hunter = MarketHunter()
+
+    # 3. 语义映射：将哲学转化为量化因子权重
+    dynamic_sat_weights = translator.translate(strategy_config.get('investment_philosophy', '稳健成长'))
+    sat_hunt_config = {"factors": dynamic_sat_weights.model_dump()} # 转换为字典供猎人使用
+    
+    # 4. 猎人出击：全市场扫描核心与卫星标的
+    logging.info("🎯 猎人正在全市场搜寻符合您哲学的标的...")
+    core_targets = hunter.hunt(strategy_config['dynamic_strategies']['core_dca'], top_n_industry=1, top_n_stocks=3)
+    sat_targets = hunter.hunt(sat_hunt_config, top_n_industry=1, top_n_stocks=3)
+    
+    # 5. 大师思维检索：用当前的“宏观体制”去检索书籍/专家的“思维框架”
+    query_context = f"市场处于 {regime_info[0]} 体制，美债收益率 {us_10y}%。在这种宏观周期下，专家或经典书籍中关于大类资产配置、仓位控制、风险防范的系统性分析逻辑是什么？"
+    expert_wisdom = kb.query_rules(query_context, n_results=3)
+    # =====================================================================
+
     # 3. 记忆与决策准备
     short_term_memory = context_loader.load_history(days=3)
     last_consensus = context_loader.load_consensus() # [Phase 6] 加载昨日共识
     trade_history_str = get_recent_trades_summary(trans_mgr.csv_path)
 
     # 合并记忆上下文
-    full_memory_context = f"{short_term_memory}\n\n=== 昨日 CIO 最终共识 ===\n{last_consensus}"
+    # 合并记忆、专家思维与猎人选股池
+    full_memory_context = f"""
+    {short_term_memory}
+    === 昨日 CIO 最终共识 ===
+    {last_consensus}
+
+    === 📚 投资大师与经典书籍的思维框架 (参考) ===
+    (请提炼以下文献的分析逻辑和应对策略，结合当下的估值与动量数据，批判性地将其应用于今日决策，绝不可生搬硬套)
+    {expert_wisdom}
+
+    === 🎯 MarketHunter 机器筛选备选池 (仅供参考) ===
+    【核心池候选 (低估红利)】: {json.dumps(core_targets, ensure_ascii=False)}
+    【卫星池候选 (哲学映射)】: {json.dumps(sat_targets, ensure_ascii=False)}
+    """
 
     # 4. 输出层：生成各类报告
     # (A) 新闻快讯
@@ -184,7 +229,7 @@ def run_investment_agent():
         portfolio_data=portfolio_context_with_history, # 注入了交易历史
         macro_news="\n".join(real_news),
         regime_info=regime_info,
-        historical_context=short_term_memory         # 注入了短期记忆
+        historical_context=full_memory_context       # <--- [Phase 7 修改] 注入包含大师知识、猎人选股和短期记忆的完全体上下文
     )
 
     # 引入红军风控官进行审查
