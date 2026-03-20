@@ -281,13 +281,6 @@ def run_investment_agent():
         f.write("\n\n---\n## 🛑 首席风控官 (红军) 审查结论\n")
         f.write(risk_report)
 
-
-        f.write(f"## 🔍 基金经理看法\n{ai_analysis}\n\n")
-        f.write(ai_analysis)
-
-        f.write("\n\n---\n## 🛑 首席风控官审查结论\n")
-        f.write(risk_report)
-
         f.write("\n\n---\n## 附录：今日参考快讯\n")
         f.write("\n".join([f"- {n}" for n in real_news[:10]]))
 
