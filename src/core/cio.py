@@ -20,7 +20,7 @@ class CIO:
                 client_args["http_client"] = httpx.Client(proxy=proxy_url)
         self.client = OpenAI(**client_args)
 
-    def arbitrate(self, advisor_report, risk_report, market_data):
+    def arbitrate(self, advisor_report, risk_report, market_data, draft_trade_list):
         system_prompt = """
         # Role: 首席投资官 (CIO)
         你是一个冷静、理性的对冲基金合伙人。你的任务是审查基金经理(Advisor)的投资建议和风控官(Risk Officer)的反驳意见。
@@ -43,13 +43,25 @@ class CIO:
         ### ⚖️ 终审决策摘要
         (一句话总结：是激进、中性还是保守？)
         ### 📊 最终操作指令表
-        | 标的 | 指令 | 执行比例/仓位 | 逻辑简述 | 止损/触发点 |
+        | 标的 | 指令 | 执行比例/仓位（精确到股数或金额） | 逻辑简述 | 止损/触发点 |
         | :--- | :--- | :--- | :--- | :--- |
         ### 🛡️ 强制执行红线
         (针对 Risk Officer 提出的致命点，给出一个具体的硬性退出条件)
+        ### 最终裁决结果
+        在 Markdown 报告分析后，必须在最后提供一个独立的 JSON 代码块，作为你的最终裁决结果。如果无需操作，请输出空列表 []。
+        格式：
+        ```json
+        [
+            {"symbol": "sh513130", "action": "BUY", "shares": 1000, "reason": "理由"},
+            {"symbol": "016452", "action": "SELL", "shares": 50, "reason": "理由"}
+        ]
+        ```
         """
 
         user_prompt = f"""
+        【数学调仓草案 (Rebalancer)】
+        {json.dumps(draft_trade_list, ensure_ascii=False)}
+
         【基金经理分析建议】
         {advisor_report}
 

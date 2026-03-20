@@ -37,7 +37,7 @@ class InvestmentAdvisor:
         self.client = OpenAI(**client_args)
 
     # === [Task 1 修改] 增加 historical_context 入参 ===
-    def analyze(self, market_data, portfolio_data, macro_news, regime_info, historical_context="无历史记录。"):
+    def analyze(self, market_data, portfolio_data, macro_news, regime_info, historical_context="无历史记录。", draft_trade_list=None):
         """
         整合多维数据调用 LLM 进行分析
         """
@@ -124,6 +124,17 @@ class InvestmentAdvisor:
         - **评估猎物**：上下文为你提供了由机器生成的【核心池/卫星池候选】，请你使用大师的视角，犀利地点评这些候选标的，挑选出最值得买入的一只，或全部否决。
         """
 
+        # [追加逻辑]
+        audit_prompt = f"""
+        # 辅助参考：定量调仓草案 (Rebalancer Draft)
+        当前系统计算的建议执行方案为：{json.dumps(draft_trade_list, ensure_ascii=False)}
+        
+        # 你的审计任务：
+        请审视上述草案。如果草案建议买入，请检查是否符合你的技术面/估值面逻辑；若不符，请在报告中明确指出修正理由。
+        """
+
+        full_system_prompt = system_prompt + audit_prompt
+
         user_prompt = f"""
         请根据以下多维数据生成今日决策：
 
@@ -138,7 +149,7 @@ class InvestmentAdvisor:
         """
 
         self.chat_history = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": full_system_prompt},
             {"role": "user", "content": user_prompt},
         ]
 

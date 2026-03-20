@@ -88,8 +88,15 @@ class MarketData:
         # 5. 量能
         if has_volume and '成交量' in df.columns:
             df['VOL_MA5'] = df['成交量'].rolling(window=5).mean()
+            # [Bugfix] 增加量比计算 (Vol_Ratio = 当日成交量 / 5日均量)
+            df['Vol_Ratio'] = np.where(
+                df['VOL_MA5'].notna() & (df['VOL_MA5'] > 0), 
+                df['成交量'] / df['VOL_MA5'], 
+                np.nan
+            )
         else:
             df['VOL_MA5'] = pd.NA
+            df['Vol_Ratio'] = np.nan
 
         # === [Phase 4.5 新增] KDJ 指标 ===
         if '最高' in df.columns and '最低' in df.columns:
@@ -273,13 +280,17 @@ class MarketData:
 
     def _pack_indicators(self, row):
         """辅助函数：打包指标"""
+        # [Bugfix] 安全获取量比，处理缺失值
+        vol_ratio = row.get('Vol_Ratio', np.nan)
+        
         return {
             "MA20": round(float(row['MA20']), 2),
             "RSI": round(float(row['RSI']), 1),
             "MACD": "金叉" if row['MACD_DIF'] > row['MACD_DEA'] else "死叉",
             "Bollinger": "Upper" if row['收盘'] >= row['BB_UP'] else ("Lower" if row['收盘'] <= row['BB_LOW'] else "Mid"),
             "K": round(float(row['K']), 1),
-            "ATR": round(float(row['ATR']), 2)
+            "ATR": round(float(row['ATR']), 2),
+            "Vol_Ratio": round(float(vol_ratio), 2) if pd.notna(vol_ratio) else "N/A" # 补上量比
         }
     
     def get_macro_metrics(self):

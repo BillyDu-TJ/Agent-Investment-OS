@@ -131,20 +131,26 @@ class ValuationManager:
         """入口"""
         asset_info = self.holdings_config.get(symbol)
         
-        # 1. 基础拦截
+        # 1. 基础拦截 (直接返回 N/A 避免 None)
         if not asset_info:
             if str(symbol).startswith("us."):
-                return {'pe': None, 'pb': None, 'status': '跳过', 'msg': '美股指数暂无实时估值'}
-            return {'pe': None, 'pb': None, 'status': '未知', 'msg': '未配置'}
+                return {'pe': 'N/A', 'pb': 'N/A', 'status': '跳过', 'msg': '美股指数暂无实时估值'}
+            return {'pe': 'N/A', 'pb': 'N/A', 'status': '未知', 'msg': '未配置'}
 
         # 2. 类型拦截
         asset_type = asset_info.get('type', 'stock')
         if asset_type in ['us_index', 'gold', 'bond', 'commodity', 'otc_fund']:
-             return {'pe': None, 'pb': None, 'status': '跳过', 'msg': f'{asset_type} 无需估值'}
+             return {'pe': 'N/A', 'pb': 'N/A', 'status': '跳过', 'msg': f'{asset_type} 无需估值'}
 
         # 3. 路由
         track_index = asset_info.get('track_index')
         if track_index:
-            return self._get_index_valuation(track_index)
+            res = self._get_index_valuation(track_index)
         else:
-            return self._get_stock_valuation(symbol)
+            res = self._get_stock_valuation(symbol)
+            
+        # [Bugfix] 统一清洗底层的 None 值为 "N/A"
+        if res.get('pe') is None: res['pe'] = "N/A"
+        if res.get('pb') is None: res['pb'] = "N/A"
+        
+        return res

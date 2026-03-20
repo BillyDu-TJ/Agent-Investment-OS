@@ -31,3 +31,16 @@ risk_governance:
   max_drawdown_limit: 0.10
   us10y_yield_threshold: 4.0
   valuation_hard_stop: 0.85
+
+rebalance_rules:
+  # 资产映射关系
+  category_mapping:
+    core: ["long"]               # term 为 long 的划入核心仓
+    satellite: ["mid", "short"]  # term 为 mid/short 的划入卫星仓
+  
+  # 容忍度阈值
+  tolerance_threshold: 0.05      # 偏离目标权重 5% 以内不进行全量调仓 (避免频繁交易)
+  
+  # 动态定投 (DCA) 参数
+  dca_build_period: 60           # 默认建仓期：60个交易日 (约3个月)
+  dca_dynamic_adjust: true       # 开启基于技术指标的动态调整

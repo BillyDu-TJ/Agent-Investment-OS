@@ -1,47 +1,67 @@
-# test_phase7_hunter.py
-from src.tools.market_hunter import MarketHunter
-import yaml
-import os
+# tests/test_rebalancer.py
+import json
+from src.tools.rebalancer import Rebalancer
 
-print("="*50)
-print("🚀 Phase 7: MarketHunter 终极选股实弹演练")
-print("="*50)
+def test_dynamic_dca_and_rebalance():
+    # 模拟从 portfolio_manager 获取的状态
+    mock_portfolio = {
+        "total_assets": 100000.0,
+        "cash": 10000.0,
+        "holdings":[
+            {
+                "name": "恒生科技ETF",
+                "symbol": "sh513130",
+                "position_value": 45000.0, # 当前占45%，属于核心仓，我们目标是35% (超配需卖出)
+                "user_intent": {"term": "long", "strategy": "value"}
+            },
+            {
+                "name": "南方纳指A",
+                "symbol": "016452",
+                "position_value": 1000.0, # 刚开始建仓，只占 1%。策略是 DCA
+                "user_intent": {"term": "long", "strategy": "dca"}
+            },
+            {
+                "name": "卫星小票",
+                "symbol": "sz300001",
+                "position_value": 25000.0, # 卫星仓目标 30% (30000)，当前 25000，缺口 5000 (恰好 5% 边缘)
+                "user_intent": {"term": "short", "strategy": "momentum"}
+            }
+        ]
+    }
 
-def test_integration():
-    # 确保 data 目录存在
-    os.makedirs("data", exist_ok=True)
+    # 模拟 strategy_profile.yaml 的配置
+    mock_strategy = {
+        "portfolio_structure": {
+            "core_weight": 0.70,
+            "satellite_weight": 0.30
+        },
+        "rebalance_rules": {
+            "category_mapping": {"core": ["long"], "satellite": ["mid", "short"]},
+            "tolerance_threshold": 0.05,
+            "dca_build_period": 60,
+            "dca_dynamic_adjust": True
+        }
+    }
+
+    # 模拟市场数据 (关键是 RSI)
+    mock_market =[
+        {"symbol": "sh513130", "close": 0.75, "indicators": {"RSI": 60}},
+        # 纳指暴跌，RSI极低，DCA应该加速买入 (1.5倍)
+        {"symbol": "016452", "close": 2.00, "indicators": {"RSI": 25}}, 
+        {"symbol": "sz300001", "close": 10.00, "indicators": {"RSI": 50}}
+    ]
+
+    rebalancer = Rebalancer(mock_portfolio, mock_strategy, mock_market)
+    trades = rebalancer.generate_trade_list()
+
+    print("\n📊 --- Rebalancer 计算结果 ---")
+    print(f"账户总资产: 100000, 现金: 10000")
+    print("理论分配目标: 核心仓(2只)目标70% -> 每只35000。卫星仓(1只)目标30% -> 30000\n")
     
-    # 1. 准备/加载 YAML 策略
-    yaml_path = "config/strategy_profile.yaml"
-    if not os.path.exists(yaml_path):
-        print(f"❌ 找不到 {yaml_path}，请确保已创建该文件并填入策略。")
-        return
-
-    with open(yaml_path, "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f)
-
-    # 2. 实例化猎人
-    hunter = MarketHunter()
-
-    # 3. 猎杀行动 (测试核心 DCA 策略)
-    print("📈 正在执行【核心 DCA 策略】扫描 (偏好低估值、高股息)...")
-    core_config = config['dynamic_strategies']['core_dca']
-    core_results = hunter.hunt(core_config, top_n_industry=1, top_n_stocks=3)
-
-    for ind, stocks in core_results.items():
-        print(f"\n🏆 [核心池] 板块: {ind}")
-        for s in stocks:
-            print(f"  -> {s['名称']}({s['代码']}) | 价格: {s['最新价']} | PE: {s['PE']} | 得分: {s['Final_Score']:.3f}")
-
-    # 4. 猎杀行动 (测试卫星动量策略)
-    print("\n🚀 正在执行【卫星动量策略】扫描 (偏好高换手、强动量)...")
-    satellite_config = config['dynamic_strategies']['satellite_momentum']
-    sat_results = hunter.hunt(satellite_config, top_n_industry=1, top_n_stocks=3)
-
-    for ind, stocks in sat_results.items():
-        print(f"\n🎯 [卫星池] 板块: {ind}")
-        for s in stocks:
-            print(f"  -> {s['名称']}({s['代码']}) | 价格: {s['最新价']} | 换手率: {s['换手率']}% | 得分: {s['Final_Score']:.3f}")
+    for t in trades:
+        print(f"[{t['action']}] {t['name']}({t['symbol']})")
+        print(f"   执行份额: {t['shares']} 份 | 消耗/回笼: ￥{t['amount']}")
+        print(f"   触发理由: {t['reason']}\n")
 
 if __name__ == "__main__":
-    test_integration()
+    test_dynamic_dca_and_rebalance()

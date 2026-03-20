@@ -29,8 +29,4 @@ venv/
 *.swp
 *.swo
 *~
-
-# 在项目根目录创建 .gitignore 文件并写入：
-data/expert_kb/*.sqlite3
-data/expert_kb/**/*.bin
-data/*.csv
+data/
