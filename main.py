@@ -127,8 +127,22 @@ def run_investment_agent():
     
     # 获取市场体制
     regime_tool = RegimeIdentifier()
-    index_df = collector.last_dfs.get("sh000001") # 默认以上证指数判定大盘体制
-    regime_info = regime_tool.identify(index_df) if index_df is not None else ("Unknown", "未能识别体制")
+    vix_val = macro_data.get('vix', 0.0) if macro_data.get('vix') != 'N/A' else 0.0
+    # 1. 获取大盘全局体制 (供 Advisor 了解系统性背景)
+    index_df = collector.last_dfs.get("sh000001") 
+    global_regime_info = regime_tool.identify(index_df, us_10y_yield=us_10y, vix=vix_val) if index_df is not None else ("Unknown", "未能识别体制")
+
+    # 2. [千股千面升级] 为每一个持仓标的计算专属 Regime
+    for item in indices_data:
+        symbol = item.get('symbol')
+        df = collector.last_dfs.get(symbol)
+        if df is not None and not df.empty:
+            r_status, r_desc = regime_tool.identify(df, us_10y_yield=us_10y, vix=vix_val)
+            item['regime'] = r_status       # 注入专属状态 (如 Aggressive Bull)
+            item['regime_desc'] = r_desc    # 注入专属描述
+        else:
+            item['regime'] = "Unknown"
+            item['regime_desc'] = "数据不足"
 
     # =====================================================================
     #[Phase 7 新增] 策略解析、猎人选股与大师知识库注入
@@ -154,7 +168,7 @@ def run_investment_agent():
     sat_targets = hunter.hunt(sat_hunt_config, top_n_industry=1, top_n_stocks=3)
     
     # 5. 大师思维检索：用当前的“宏观体制”去检索书籍/专家的“思维框架”
-    query_context = f"市场处于 {regime_info[0]} 体制，美债收益率 {us_10y}%。在这种宏观周期下，专家或经典书籍中关于大类资产配置、仓位控制、风险防范的系统性分析逻辑是什么？"
+    query_context = f"市场处于 {global_regime_info[0]} 体制，美债收益率 {us_10y}%。在这种宏观周期下，专家或经典书籍中关于大类资产配置、仓位控制、风险防范的系统性分析逻辑是什么？"
     expert_wisdom = kb.query_rules(query_context, n_results=3)
     # =====================================================================
 
@@ -195,6 +209,7 @@ def run_investment_agent():
         ("名称", "name"),
         ("价格", "close"),
         ("涨跌", "change_pct"),
+        ("专属体制", "regime"),           
         ("PE(估值)", "valuation.pe"),     
         ("PB(市净)", "valuation.pb"),     
         ("RSI", "indicators.RSI"),
@@ -234,7 +249,7 @@ def run_investment_agent():
         market_data=indices_data,
         portfolio_data=portfolio_context_with_history, # 注入了交易历史
         macro_news="\n".join(real_news),
-        regime_info=regime_info,
+        regime_info=global_regime_info,
         historical_context=full_memory_context,       # <--- [Phase 7 修改] 注入包含大师知识、猎人选股和短期记忆的完全体上下文
         draft_trade_list=draft_trade_list
     )

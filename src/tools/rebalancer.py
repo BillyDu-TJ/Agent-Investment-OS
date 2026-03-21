@@ -85,21 +85,36 @@ class Rebalancer:
             target_trade_value = 0.0
             reason_msg = ""
 
+            # 获取该标的专属的 Regime (如果没拿到，默认当震荡市处理)
+            current_regime = mkt_info.get('regime', 'Shock')
+
             # ==========================================
-            # 核心算法 A: 动态定投逻辑 (Dynamic DCA)
+            # 核心算法 A: 动态定投逻辑 (Regime-Aware DCA)
             # ==========================================
             if strategy == 'dca' and gap_value > 0:
-                # 每天基础买入金额 = 目标市值 / 建仓天数
                 base_daily_buy = target_value / dca_period
                 multiplier = 1.0
                 
-                # 基于 RSI 的动态乘数 (跌得多买得多，涨得多买得少)
                 if dca_dynamic:
-                    if isinstance(current_rsi, (int, float)):
-                        if current_rsi < 35: multiplier = 1.5   # 严重超卖，加速买入
-                        elif current_rsi < 45: multiplier = 1.2 # 偏低，略微加速
-                        elif current_rsi > 65: multiplier = 0.5 # 超买，减少买入
-                        elif current_rsi > 80: multiplier = 0.0 # 极度超买，暂停定投
+                    if current_regime in ['Bear', 'Panic', 'Correction']:
+                        # 熊市/恐慌/宏观回调：防接飞刀。RSI再低也不能满目加仓。
+                        if current_rsi < 35: multiplier = 0.5   # 阴跌不休，半仓定投(防深跌)
+                        elif current_rsi > 50: multiplier = 0.0 # 稍有反弹就停止买入
+                        else: multiplier = 0.8                  # 默认防守减速
+                        reason_msg = f"动态定投: 体制[{current_regime}], 规避接飞刀, 乘数={multiplier}x"
+                        
+                    elif current_regime in ['Aggressive Bull', 'Passive Bull']:
+                        # 牛市：千金难买牛回头。强势不恐高。
+                        if current_rsi < 45: multiplier = 1.5   # 牛市回踩，加速买入
+                        elif current_rsi > 80: multiplier = 1.0 # 极度超买，维持正常定投，不减速！
+                        else: multiplier = 1.2                  # 默认顺势加速
+                        reason_msg = f"动态定投: 体制[{current_regime}], 顺势定投, 乘数={multiplier}x"
+                        
+                    else:
+                        # 震荡市 (Shock / Unknown)：回归高抛低吸
+                        if current_rsi < 35: multiplier = 1.5
+                        elif current_rsi > 65: multiplier = 0.5
+                        reason_msg = f"动态定投: 体制[{current_regime}], 震荡高抛低吸, 乘数={multiplier}x"
                 
                 target_trade_value = base_daily_buy * multiplier
                 # 兜底：不能超过实际缺口
@@ -108,7 +123,8 @@ class Rebalancer:
                     
                 if target_trade_value > 0:
                     action = "BUY"
-                    reason_msg = f"动态定投: RSI={current_rsi}, 乘数={multiplier}x"
+                    # 如果前面没设 reason_msg，补上默认的
+                    if not reason_msg: reason_msg = f"动态定投: 基础乘数"
 
             # ==========================================
             # 核心算法 B: 存量资产重平衡 (非 DCA 或 卖出)

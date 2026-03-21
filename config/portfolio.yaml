@@ -4,7 +4,7 @@ holdings:
   symbol: sh513130
   cost: 0.7466
   shares: 4900.0
-  strategy: value
+  strategy: dca
   term: long
   track_index: H30533
   reason: 看好港股科技板块超跌后的估值修复，作为底仓配置
