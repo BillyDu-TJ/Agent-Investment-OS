@@ -33,3 +33,5 @@ venv/
 *.swo
 *~
 data/
+*.bin
+*.sqlite3
