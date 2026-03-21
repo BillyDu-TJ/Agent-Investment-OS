@@ -188,6 +188,77 @@ class TransactionManager:
             
             return True # 返回 True 表示发生了清洗
         return False
+    
+    def execute_batch(self, trade_list: list) -> str:
+        """
+        [Task 3] 批量执行 Rebalancer 生成的交易清单
+        """
+        portfolio = self._load_portfolio()
+        cash = float(portfolio.get('cash', 0.0))
+        holdings = portfolio.get('holdings', [])
+        
+        messages =[]
+        messages.append("📝 开始执行批量调仓指令...")
+        
+        for trade in trade_list:
+            action = trade['action']
+            symbol = trade['symbol']
+            shares = float(trade['shares'])
+            price = float(trade['price'])
+            amount = float(trade.get('amount', shares * price))
+            
+            # 在现有的 holdings 中找到目标字典的引用 (直接修改该引用，其他字段就不会丢)
+            target = next((h for h in holdings if str(h.get('symbol')) == str(symbol)), None)
+            
+            if not target:
+                messages.append(f"⚠️ 跳过: 未在账本中找到 {symbol}。不支持自动新建仓。")
+                continue
+            
+            old_shares = float(target.get('shares', 0.0))
+            old_cost = float(target.get('cost', 0.0))
+            
+            if action == "BUY":
+                if cash < amount:
+                    messages.append(f"❌ 资金不足以买入 {symbol} (需 {amount:.2f}，剩余 {cash:.2f})")
+                    continue
+                
+                # 加权成本计算
+                new_shares = old_shares + shares
+                new_cost = (old_cost * old_shares + amount) / new_shares if new_shares > 0 else 0
+                
+                # 仅更新关键数值字段，完美保留 strategy/term/reason/track_index 等原样字段！
+                target['shares'] = round(new_shares, 4)
+                target['cost'] = round(new_cost, 4)
+                cash -= amount
+                
+                self._log_trade("BUY", symbol, price, shares, amount, 0.0)
+                messages.append(f"✅ [买入] {target.get('name')} {shares}份。耗资: {amount:.2f}")
+                
+            elif action == "SELL":
+                # 防爆仓校验
+                if old_shares < shares:
+                    shares = old_shares
+                    amount = shares * price
+                
+                realized_pnl = (price - old_cost) * shares
+                new_shares = round(old_shares - shares, 4)
+                
+                if new_shares <= 0.0001: # 容差清仓
+                    holdings.remove(target)
+                    messages.append(f"✅ [清仓] {target.get('name')} 已全部卖出。回笼: {amount:.2f}")
+                else:
+                    target['shares'] = new_shares
+                    messages.append(f"✅ [卖出] {target.get('name')} {shares}份。回笼: {amount:.2f}")
+                    
+                cash += amount
+                self._log_trade("SELL", symbol, price, shares, amount, realized_pnl)
+
+        # 最终保存
+        portfolio['cash'] = round(cash, 2)
+        self._save_portfolio(portfolio)
+        messages.append(f"💰 调仓完毕，当前可用现金余额: {portfolio['cash']:.2f}")
+        
+        return "\n".join(messages)
 
 # --- 独立测试入口 ---
 if __name__ == "__main__":

@@ -61,6 +61,16 @@ class ReportGenerator:
                     if val == "Upper": val = "⚠️ 触顶"
                     elif val == "Lower": val = "💎 触底"
                     elif val == "Mid": val = "✅ 中轨"
+                elif key_path == "regime":
+                    regime_map = {
+                        "Aggressive Bull": "🚀 快牛",
+                        "Passive Bull": "🐂 慢牛",
+                        "Correction": "⚠️ 回调",
+                        "Bear": "📉 熊市",
+                        "Panic": "😱 恐慌",
+                        "Shock": "⚖️ 震荡"
+                    }
+                    val = regime_map.get(val, f"❓ {val}")
 
                 row_cells.append(str(val))
             lines.append("| " + " | ".join(row_cells) + " |")

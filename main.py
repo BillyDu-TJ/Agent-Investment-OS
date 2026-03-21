@@ -6,6 +6,7 @@ import logging
 import csv
 from datetime import datetime
 from openai import OpenAI
+import re
 
 from src.tools.market_data import MarketData
 from src.tools.valuation import ValuationManager
@@ -17,7 +18,6 @@ from src.core.regime import RegimeIdentifier
 from src.core.memory import ContextLoader            # [Task 1] 记忆引擎
 from src.utils.report_gen import ReportGenerator
 from src.utils.obsidian_sync import ObsidianSyncer   # [Task 3] 知识库同步
-from src.core.advisor import InvestmentAdvisor
 from src.core.risk_officer import RiskOfficer  # [Phase 5 新增]
 from src.core.cio import CIO  # [Phase 5 新增]
 from src.tools.macro_sentinels import MacroSentinel # [New]
@@ -25,6 +25,8 @@ import json # [New] 用于 debug 打印
 from src.core.strategy_parser import PolicyTranslator
 from src.tools.market_hunter import MarketHunter
 from src.core.knowledge_base import ExpertKnowledgeBase
+from src.tools.rebalancer import Rebalancer
+from src.tools.performance_tracker import PerformanceTracker
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -125,8 +127,22 @@ def run_investment_agent():
     
     # 获取市场体制
     regime_tool = RegimeIdentifier()
-    index_df = collector.last_dfs.get("sh000001") # 默认以上证指数判定大盘体制
-    regime_info = regime_tool.identify(index_df) if index_df is not None else ("Unknown", "未能识别体制")
+    vix_val = macro_data.get('vix', 0.0) if macro_data.get('vix') != 'N/A' else 0.0
+    # 1. 获取大盘全局体制 (供 Advisor 了解系统性背景)
+    index_df = collector.last_dfs.get("sh000001") 
+    global_regime_info = regime_tool.identify(index_df, us_10y_yield=us_10y, vix=vix_val) if index_df is not None else ("Unknown", "未能识别体制")
+
+    # 2. [千股千面升级] 为每一个持仓标的计算专属 Regime
+    for item in indices_data:
+        symbol = item.get('symbol')
+        df = collector.last_dfs.get(symbol)
+        if df is not None and not df.empty:
+            r_status, r_desc = regime_tool.identify(df, us_10y_yield=us_10y, vix=vix_val)
+            item['regime'] = r_status       # 注入专属状态 (如 Aggressive Bull)
+            item['regime_desc'] = r_desc    # 注入专属描述
+        else:
+            item['regime'] = "Unknown"
+            item['regime_desc'] = "数据不足"
 
     # =====================================================================
     #[Phase 7 新增] 策略解析、猎人选股与大师知识库注入
@@ -152,7 +168,7 @@ def run_investment_agent():
     sat_targets = hunter.hunt(sat_hunt_config, top_n_industry=1, top_n_stocks=3)
     
     # 5. 大师思维检索：用当前的“宏观体制”去检索书籍/专家的“思维框架”
-    query_context = f"市场处于 {regime_info[0]} 体制，美债收益率 {us_10y}%。在这种宏观周期下，专家或经典书籍中关于大类资产配置、仓位控制、风险防范的系统性分析逻辑是什么？"
+    query_context = f"市场处于 {global_regime_info[0]} 体制，美债收益率 {us_10y}%。在这种宏观周期下，专家或经典书籍中关于大类资产配置、仓位控制、风险防范的系统性分析逻辑是什么？"
     expert_wisdom = kb.query_rules(query_context, n_results=3)
     # =====================================================================
 
@@ -193,6 +209,7 @@ def run_investment_agent():
         ("名称", "name"),
         ("价格", "close"),
         ("涨跌", "change_pct"),
+        ("专属体制", "regime"),           
         ("PE(估值)", "valuation.pe"),     
         ("PB(市净)", "valuation.pb"),     
         ("RSI", "indicators.RSI"),
@@ -224,12 +241,17 @@ def run_investment_agent():
     {trade_history_str}
     """
 
+    # 计算出数学草案
+    rebalancer = Rebalancer(portfolio_status, strategy_config, indices_data)
+    draft_trade_list = rebalancer.generate_trade_list() 
+
     ai_analysis = advisor.analyze(
         market_data=indices_data,
         portfolio_data=portfolio_context_with_history, # 注入了交易历史
         macro_news="\n".join(real_news),
-        regime_info=regime_info,
-        historical_context=full_memory_context       # <--- [Phase 7 修改] 注入包含大师知识、猎人选股和短期记忆的完全体上下文
+        regime_info=global_regime_info,
+        historical_context=full_memory_context,       # <--- [Phase 7 修改] 注入包含大师知识、猎人选股和短期记忆的完全体上下文
+        draft_trade_list=draft_trade_list
     )
 
     # 引入红军风控官进行审查
@@ -240,13 +262,20 @@ def run_investment_agent():
     )
     risk_report = risk_officer.evaluate(ai_analysis, indices_data)
 
+    
+
     # CIO 进行最终决策
     cio_engine = CIO(
         api_key=settings['api_key'], 
         base_url=settings.get('base_url'),
         proxy_config=settings.get('proxy')
     )
-    final_decision = cio_engine.arbitrate(ai_analysis, risk_report, indices_data)
+    final_decision = cio_engine.arbitrate(
+        ai_analysis,
+        risk_report,
+        indices_data,
+        draft_trade_list
+    )
 
     # [Phase 6] 保存今日共识，供明日参考
     context_loader.save_consensus(today_str, final_decision)
@@ -272,6 +301,60 @@ def run_investment_agent():
 
     # [Task 3] 同步 AI 报告到 Obsidian
     obsidian_sync.archive_daily_report(ai_report_path)
+
+    # =====================================================================
+    # [Task 4] 记录今日总资产净值，并在终端展示近一周收益
+    # =====================================================================
+    tracker = PerformanceTracker()
+    current_total_nav = portfolio_status.get('total_assets', 0.0)
+    tracker.record_nav(current_total_nav)
+    weekly_ret = tracker.get_weekly_return()
+    logging.info(f"📈 OS 近一周累计收益评估: {weekly_ret}")
+
+    # =====================================================================
+    # [Task 2 & 3] 定量调仓引擎与终端确认 (Human-in-the-loop)
+    # =====================================================================
+    # 1. 此时 final_trades 已经通过 CIO 的 JSON 解析提取出来了
+    # 如果 final_trades 为空（CIO 没操作），则无需执行；如果不为空，执行 final_trades
+
+    final_trades = []
+    json_match = re.search(r'```json\s*(.*?)\s*```', final_decision, re.DOTALL)
+
+    if json_match:
+        json_str = json_match.group(1)
+        try:
+            final_trades = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            logging.error(f"❌ JSON 解析错误: {e}")
+
+    if final_trades:
+        print("\n" + "!" * 60)
+        print("⚖️ [CIO 最终裁决执行清单] - 只有出现在此清单中的才会被执行")
+        print("!" * 60)
+        
+        for t in final_trades:
+            # 颜色标记
+            color_action = "\033[91m[买入]\033[0m" if t['action'] == "BUY" else "\033[92m[卖出]\033[0m"
+            print(f"{color_action} {t['symbol']} | 份额: {t['shares']} | 理由: {t['reason']}")
+            
+        print("-" * 60)
+        
+        # 拦截终端确认
+        exec_mode = strategy_config.get('portfolio_structure', {}).get('execution_mode', 'confirm')
+        if exec_mode == 'auto':
+            print("🚀 系统处于 AUTO 模式，正在自动执行 CIO 裁决清单...")
+            res_msg = trans_mgr.execute_batch(final_trades) # 必须使用 final_trades
+            print(res_msg)
+        else:
+            choice = input("⚠️ 是否一键执行上述 AI 裁决清单？(y/n): ").strip().lower()
+            if choice == 'y':
+                res_msg = trans_mgr.execute_batch(final_trades) # 必须使用 final_trades
+                print(res_msg)
+                print("📝 记得前往真实的券商 APP 中完成对应的交易动作！")
+            else:
+                print("❌ 已放弃本次调仓操作。")
+    else:
+        print("\n✅ CIO 决策结论：当前无需进行任何调仓操作 (清单为空)。")
 
     logging.info("=" * 50)
     logging.info(f"✅ 核心流程完成。")
