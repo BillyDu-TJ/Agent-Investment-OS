@@ -2,6 +2,12 @@
 
 /config/settings.yaml
 
+/config/portfolio.yaml
+
+/config/portfolio_backup.yaml
+
+/config/strategy_profile.yaml
+
 risk_auditor.md
 
 reports/
