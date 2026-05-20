@@ -43,3 +43,52 @@ def no_proxy_context():
         for k, v in env_backup.items():
             os.environ[k] = v
         # logging.debug("🔄 [网络隔离] 已解除")
+
+
+@contextmanager
+def proxy_context(proxy_url: str = None):
+    """
+    [网络隔离 - 正向]
+    临时启用代理设置，完成后恢复。
+    适用于：需要代理才能访问的数据源（如 AkShare 连接东方财富获取 PE 数据）。
+    """
+    # 如果没有提供代理 URL，从环境变量读取
+    if proxy_url is None:
+        proxy_url = (
+            os.environ.get('http_proxy') or 
+            os.environ.get('https_proxy') or 
+            os.environ.get('HTTP_PROXY') or 
+            os.environ.get('HTTPS_PROXY')
+        )
+    
+    if not proxy_url:
+        # 没有代理配置，直接执行（不报错）
+        yield
+        return
+    
+    # 备份可能存在的代理设置
+    proxy_vars = [
+        'http_proxy', 'https_proxy', 'all_proxy', 
+        'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY'
+    ]
+    env_backup = {}
+    for k in proxy_vars:
+        if k in os.environ:
+            env_backup[k] = os.environ[k]
+    
+    # 设置代理
+    os.environ['http_proxy'] = proxy_url
+    os.environ['https_proxy'] = proxy_url
+    
+    try:
+        yield
+    finally:
+        # 恢复原状
+        os.environ.pop('http_proxy', None)
+        os.environ.pop('https_proxy', None)
+        os.environ.pop('all_proxy', None)
+        os.environ.pop('HTTP_PROXY', None)
+        os.environ.pop('HTTPS_PROXY', None)
+        os.environ.pop('ALL_PROXY', None)
+        for k, v in env_backup.items():
+            os.environ[k] = v

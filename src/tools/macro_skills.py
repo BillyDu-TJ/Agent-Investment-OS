@@ -9,6 +9,7 @@
 """
 
 from typing import Dict, Any
+from src.tools.market_data import MarketData
 from src.tools.valuation import ValuationManager
 from src.tools.macro_sentinels import MacroSentinel
 
@@ -85,51 +86,57 @@ def get_global_macro_snapshot(params: Dict[str, Any]) -> Dict[str, Any]:
     """
     try:
         macro_sentinel = MacroSentinel()
-        
+        market_data = MarketData()
+
+        raw_macro = macro_sentinel.get_macro_data()
+        macro_metrics = market_data.get_macro_metrics()
+
         result = {
             "vix": None,
             "usd_cnh": None,
-            "us_10y_yield": None
+            "gold_price": None,
+            "us_10y_yield": None,
         }
-        success_count = 0
         messages = []
-        
-        # 获取 VIX
-        try:
-            vix_data = macro_sentinel.get_vix()
-            if vix_data:
-                result["vix"] = vix_data
-                success_count += 1
-        except Exception as e:
-            messages.append(f"VIX 获取失败：{str(e)}")
-        
-        # 获取 USD/CNH
-        try:
-            usd_cnh_data = macro_sentinel.get_usd_cnh()
-            if usd_cnh_data:
-                result["usd_cnh"] = usd_cnh_data
-                success_count += 1
-        except Exception as e:
-            messages.append(f"USD/CNH 获取失败：{str(e)}")
-        
-        # 获取美债收益率
-        try:
-            us_10y_data = macro_sentinel.get_us_10y_yield()
-            if us_10y_data:
-                result["us_10y_yield"] = us_10y_data
-                success_count += 1
-        except Exception as e:
-            messages.append(f"美债收益率获取失败：{str(e)}")
-        
-        # 生成综合评估
-        summary = _generate_macro_summary(result)
-        
-        if success_count == 3:
-            return {"status": "success", "data": result, "summary": summary}
-        elif success_count > 0:
-            return {"status": "partial", "data": result, "summary": summary, "message": "; ".join(messages)}
+
+        vix_value = raw_macro.get("vix") if isinstance(raw_macro, dict) else None
+        if isinstance(vix_value, (int, float)):
+            level = "high" if vix_value >= 30 else "normal"
+            result["vix"] = {"value": float(vix_value), "level": level}
         else:
-            return {"status": "error", "message": "All macro indicators failed: " + "; ".join(messages)}
+            messages.append("VIX 数据不可用")
+
+        usd_cnh_value = raw_macro.get("usd_cnh") if isinstance(raw_macro, dict) else None
+        if isinstance(usd_cnh_value, (int, float)):
+            result["usd_cnh"] = {"value": float(usd_cnh_value)}
+        else:
+            messages.append("USD/CNH 数据不可用")
+
+        gold_value = raw_macro.get("gold_price") if isinstance(raw_macro, dict) else None
+        if isinstance(gold_value, (int, float)):
+            result["gold_price"] = {"value": float(gold_value)}
+        else:
+            messages.append("黄金数据不可用")
+
+        us_10y_value = macro_metrics.get("us_10y") if isinstance(macro_metrics, dict) else None
+        if isinstance(us_10y_value, (int, float)):
+            result["us_10y_yield"] = {"value": float(us_10y_value)}
+        else:
+            messages.append("美债收益率数据不可用")
+
+        summary = _generate_macro_summary(result)
+        success_count = sum(1 for value in result.values() if value)
+
+        if success_count == len(result):
+            return {"status": "success", "data": result, "summary": summary}
+        if success_count > 0:
+            return {
+                "status": "partial",
+                "data": result,
+                "summary": summary,
+                "message": "; ".join(messages),
+            }
+        return {"status": "error", "message": "All macro indicators failed: " + "; ".join(messages)}
             
     except Exception as e:
         return {"status": "error", "message": f"Failed to get macro snapshot: {str(e)}"}
@@ -149,6 +156,10 @@ def _generate_macro_summary(data: Dict[str, Any]) -> str:
     usd_cnh = data.get("usd_cnh")
     if usd_cnh and usd_cnh.get("value"):
         summary_parts.append(f"USD/CNH={usd_cnh.get('value'):.4f}")
+
+    gold = data.get("gold_price")
+    if gold and gold.get("value"):
+        summary_parts.append(f"Gold={gold.get('value'):.2f}")
     
     # 美债收益率评估
     us_10y = data.get("us_10y_yield")

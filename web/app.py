@@ -11,6 +11,7 @@ TableData = Dict[str, List[Any]]
 import pandas as pd
 import streamlit as st
 import yaml
+from dotenv import load_dotenv
 from openai import OpenAI
 from chat_engine import build_model_candidates, get_default_chat_config, run_chat_stream
 
@@ -27,6 +28,8 @@ CONFIG_DIR = ROOT_DIR / "config"
 
 NAV_PATH = DATA_DIR / "nav_history.csv"
 STRATEGY_PATH = CONFIG_DIR / "strategy_profile.yaml"
+
+load_dotenv()
 
 
 st.set_page_config(
@@ -809,7 +812,12 @@ else:
             "base_url": defaults["base_url"],
             "api_key": defaults["api_key"],
             "custom_model": "",
+            "recursion_limit": 12,
         }
+    else:
+        defaults = get_default_chat_config()
+        if not st.session_state["chat_settings"].get("api_key") and defaults.get("api_key"):
+            st.session_state["chat_settings"]["api_key"] = defaults.get("api_key")
 
     settings = st.session_state["chat_settings"]
     action_col, clear_col = st.columns([4, 1])
@@ -850,6 +858,13 @@ else:
             value=settings.get("api_key", ""),
             placeholder="未配置时将读取环境变量",
         )
+        recursion_limit = st.slider(
+            "最大推理步数",
+            min_value=5,
+            max_value=40,
+            value=int(settings.get("recursion_limit", 12)),
+            step=1,
+        )
         st.caption("后端 API 解析逻辑可在 web/chat_engine.py 的 resolve_api_config 中调整。")
 
         settings.update(
@@ -858,14 +873,19 @@ else:
                 "base_url": base_url,
                 "api_key": api_key,
                 "custom_model": custom_model,
+                "recursion_limit": recursion_limit,
             }
         )
+
+    if "uploader_key_version" not in st.session_state:
+        st.session_state["uploader_key_version"] = 0
+    uploader_key = f"chat_uploads_{st.session_state['uploader_key_version']}"
 
     uploads = st.file_uploader(
         "上传文件或图片（可多选）",
         type=["txt", "md", "csv", "json", "yaml", "yml", "png", "jpg", "jpeg", "webp"],
         accept_multiple_files=True,
-        key="chat_uploads",
+        key=uploader_key,
         help="文本文件将注入对话上下文，图片会显示预览但不会自动解析。",
     )
 
@@ -927,9 +947,10 @@ else:
                     model_name=model_to_use,
                     base_url=settings.get("base_url"),
                     api_key=settings.get("api_key"),
+                    recursion_limit=settings.get("recursion_limit", 12),
                 ):
                     if event.get("type") == "assistant":
-                        assistant_text += event.get("content", "")
+                        assistant_text = event.get("content", "")
                         assistant_placeholder.markdown(assistant_text)
                     elif event.get("type") == "tool_call":
                         if tool_status is None:
@@ -963,4 +984,4 @@ else:
                 "model_content": assistant_text,
             }
         )
-        st.session_state["chat_uploads"] = []
+        st.session_state["uploader_key_version"] += 1

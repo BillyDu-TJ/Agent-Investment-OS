@@ -9,7 +9,45 @@
 """
 
 from typing import Dict, Any, List, Optional
+import pandas as pd
 from src.tools.market_data import MarketData
+
+
+def _guess_target_type(symbol: str) -> str:
+    if symbol.startswith("us."):
+        return "us_index"
+    if symbol.startswith("hk."):
+        return "hk_index"
+    if symbol.isdigit() and len(symbol) == 6:
+        return "otc_fund"
+    if symbol in {"sh000001", "sh000300", "sz399006"}:
+        return "index"
+    return "stock"
+
+
+def _ensure_symbol_in_targets(market_data: MarketData, symbol: str) -> None:
+    existing = {item.get("symbol") for item in market_data.TARGETS}
+    if symbol in existing:
+        return
+    market_data.update_targets(
+        [{"name": symbol, "symbol": symbol, "type": _guess_target_type(symbol)}]
+    )
+
+
+def _fetch_single_asset(market_data: MarketData, symbol: str) -> Optional[Dict[str, Any]]:
+    target_type = _guess_target_type(symbol)
+    if target_type == "hk_index":
+        return None
+    if target_type == "us_index":
+        normalized = symbol.strip()
+        if normalized.lower().startswith("us."):
+            normalized = "us." + normalized.split(".", 1)[1].upper()
+        return market_data.get_us_data_from_tencent(normalized, normalized)
+    if target_type == "otc_fund":
+        return market_data.get_otc_fund_data(symbol, symbol)
+    if target_type == "index":
+        return market_data.get_data_from_tencent(symbol, symbol, "index")
+    return market_data.get_data_from_tencent(symbol, symbol, "stock")
 
 
 def fetch_realtime_price(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -37,31 +75,28 @@ def fetch_realtime_price(params: Dict[str, Any]) -> Dict[str, Any]:
         symbol = params.get("symbol")
         if not symbol:
             return {"status": "error", "message": "Missing required parameter: symbol"}
+
+        symbol = str(symbol).strip()
+        if symbol.lower().startswith("hk."):
+            return {
+                "status": "error",
+                "message": "暂不支持港股指数代码，请使用对应 ETF 或 A 股/美股指数代码。",
+            }
         
         market_data = MarketData()
-        summary = market_data.get_market_summary()
-        
-        # 在所有资产类别中查找指定 symbol
-        all_assets = (
-            summary.get("indices", []) +
-            summary.get("us_indices", []) +
-            summary.get("funds", []) +
-            summary.get("stocks", [])
-        )
-        
-        for asset in all_assets:
-            if asset.get("symbol") == symbol:
-                return {
-                    "status": "success",
-                    "data": {
-                        "symbol": symbol,
-                        "price": asset.get("close"),
-                        "change_pct": asset.get("change_pct"),
-                        "update_time": asset.get("update_time")
-                    }
-                }
-        
-        return {"status": "error", "message": f"Symbol {symbol} not found in market summary"}
+        asset = _fetch_single_asset(market_data, symbol)
+        if not asset:
+            return {"status": "error", "message": f"Symbol {symbol} not found or unsupported"}
+
+        return {
+            "status": "success",
+            "data": {
+                "symbol": symbol,
+                "price": asset.get("close"),
+                "change_pct": asset.get("change_pct"),
+                "update_time": asset.get("date"),
+            },
+        }
         
     except Exception as e:
         return {"status": "error", "message": f"Failed to fetch price: {str(e)}"}
@@ -94,16 +129,47 @@ def get_technical_indicators(params: Dict[str, Any]) -> Dict[str, Any]:
         symbol = params.get("symbol")
         if not symbol:
             return {"status": "error", "message": "Missing required parameter: symbol"}
+
+        symbol = str(symbol).strip()
+        if symbol.lower().startswith("hk."):
+            return {
+                "status": "error",
+                "message": "暂不支持港股指数代码，请使用对应 ETF 或 A 股/美股指数代码。",
+            }
         
         indicators = params.get("indicators", ["ma5", "ma20", "rsi"])
-        
+
         market_data = MarketData()
-        result = market_data.calculate_technical_indicators(symbol, indicators)
-        
-        if result.get("status") == "success":
-            return {"status": "success", "data": result.get("data")}
-        else:
-            return {"status": "error", "message": result.get("message", "Unknown error")}
+        asset = _fetch_single_asset(market_data, symbol)
+        if not asset:
+            return {"status": "error", "message": f"Symbol {symbol} not found or unsupported"}
+
+        raw_indicators = asset.get("indicators")
+        if not isinstance(raw_indicators, dict):
+            return {"status": "error", "message": "Indicators payload is not a dict"}
+
+        mapping = {
+            "ma20": "MA20",
+            "ma60": "MA60",
+            "ma200": "MA200",
+            "rsi": "RSI",
+            "macd": "MACD",
+            "boll": "Bollinger",
+            "kdj": "K",
+            "atr": "ATR",
+            "vol_ratio": "Vol_Ratio",
+        }
+
+        data: Dict[str, Any] = {}
+        for name in indicators:
+            key = str(name).lower()
+            actual = mapping.get(key)
+            if not actual:
+                data[name] = "N/A"
+                continue
+            data[name] = raw_indicators.get(actual, "N/A")
+
+        return {"status": "success", "data": data}
             
     except Exception as e:
         return {"status": "error", "message": f"Failed to calculate indicators: {str(e)}"}
@@ -133,16 +199,38 @@ def get_volume_analysis(params: Dict[str, Any]) -> Dict[str, Any]:
         symbol = params.get("symbol")
         if not symbol:
             return {"status": "error", "message": "Missing required parameter: symbol"}
+
+        symbol = str(symbol).strip()
+        if symbol.lower().startswith("hk."):
+            return {
+                "status": "error",
+                "message": "暂不支持港股指数代码，请使用对应 ETF 或 A 股/美股指数代码。",
+            }
         
         market_data = MarketData()
-        result = market_data.analyze_volume(symbol)
-        
-        if result.get("status") == "success":
-            return {"status": "success", "data": result.get("data")}
-        elif result.get("status") == "skipped":
-            return {"status": "skipped", "message": result.get("message")}
-        else:
-            return {"status": "error", "message": result.get("message", "Unknown error")}
+        asset = _fetch_single_asset(market_data, symbol)
+        if not asset:
+            return {"status": "error", "message": f"Symbol {symbol} not found or unsupported"}
+
+        df = market_data.last_dfs.get(symbol)
+        if df is None or df.empty:
+            return {"status": "skipped", "message": "No volume data available"}
+
+        latest = df.iloc[-1]
+        vol_ratio = latest.get("Vol_Ratio")
+        if vol_ratio is None or (isinstance(vol_ratio, float) and pd.isna(vol_ratio)):
+            return {"status": "skipped", "message": "Vol_Ratio not available"}
+
+        signal = "正常"
+        if float(vol_ratio) >= 1.5:
+            signal = "放量"
+        elif float(vol_ratio) <= 0.7:
+            signal = "缩量"
+
+        return {
+            "status": "success",
+            "data": {"volume_ratio": round(float(vol_ratio), 2), "signal": signal},
+        }
             
     except Exception as e:
         return {"status": "error", "message": f"Failed to analyze volume: {str(e)}"}

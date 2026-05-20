@@ -10,6 +10,8 @@
 
 risk_auditor.md
 
+test.py
+
 reports/
 
 .DS_Store
@@ -42,3 +44,5 @@ data/
 *.bin
 *.sqlite3
 *.csv
+
+.env

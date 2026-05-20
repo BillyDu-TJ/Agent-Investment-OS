@@ -6,7 +6,7 @@ import logging
 import pandas as pd
 import akshare as ak
 from typing import Dict, Optional, Any
-from src.utils.network import no_proxy_context  # [Phase 4.5] 引入隔离工具
+from src.utils.network import proxy_context  
 
 # 日志配置
 logger = logging.getLogger(__name__)
@@ -38,13 +38,12 @@ class ValuationManager:
     def _fetch_stock_spot_data(self):
         """
         惰性加载：拉取全市场个股实时行情大表
-        [Phase 4.5 修复]: 使用 no_proxy_context 强制绕过系统代理
         """
         if self._stock_spot_data is None:
             logger.info("[Valuation] 首次查询，正在拉取A股全市场估值大表 (需强制直连)...")
             try:
                 # === 关键修改点 ===
-                with no_proxy_context():
+                with proxy_context():
                     # 这里的数据量较大，东财接口容易超时，增加重试机制或单纯的直连
                     self._stock_spot_data = ak.stock_zh_a_spot_em()
                 
@@ -59,39 +58,48 @@ class ValuationManager:
         clean_code = ''.join(filter(str.isdigit, str(track_index)))
         res = {'pe': None, 'pb': None, 'dividend_yield': None, 'date': None, 'type': '指数'}
         try:
+            logger.info(f"[Valuation] 正在获取指数 {clean_code} 的估值数据...")
             # 同样应用直连隔离，防止中证官网接口被代理拦截
-            with no_proxy_context():
+            with proxy_context():
                 df = ak.stock_zh_index_value_csindex(symbol=clean_code)
+
+            logger.debug(f"[Valuation] 原始数据列名: {df.columns.tolist()}")
+            logger.debug(f"[Valuation] 最新数据行: {df.iloc[-1].to_dict()}")
                 
             if df is not None and not pd.to_datetime(df['日期']).empty:
-                res['pe'] = float(df['市盈率1'].iloc[-1])
+                # 显式检查列是否存在
+                if '市盈率1' in df.columns:
+                    pe_value = df['市盈率1'].iloc[-1]
+                    logger.info(f"[Valuation] PE 值: {pe_value}")
+                    res['pe'] = float(pe_value) if pd.notna(pe_value) else None
+                else:
+                    logger.error(f"[Valuation] 列 '市盈率1' 不存在！可用列: {df.columns.tolist()}")
+                
+            if '股息率1' in df.columns:
                 res['dividend_yield'] = float(df['股息率1'].iloc[-1])
-                res['date'] = str(df['日期'].iloc[-1]) 
+            if '日期' in df.columns:
+                res['date'] = str(df['日期'].iloc[-1])
         except Exception as e:
             logger.debug(f"[Valuation] 指数 {track_index} 估值获取失败: {e}")
         return res
 
     def _get_stock_valuation(self, symbol: str) -> Dict:
         """引擎 2：获取个股估值 (查大表)"""
-        clean_code = ''.join(filter(str.isdigit, str(symbol)))
+        """引擎 2：获取个股估值"""
         res = {'pe': None, 'pb': None, 'type': '个股'}
-        
-        self._fetch_stock_spot_data()
-        
-        if self._stock_spot_data is not None and not self._stock_spot_data.empty:
-            try:
-                # 兼容不同列名 (东财接口有时列名会有微调)
-                # 通常是 '代码', '市盈率-动态', '市净率'
-                target_row = self._stock_spot_data[self._stock_spot_data['代码'] == clean_code]
-                if not target_row.empty:
-                    # 安全获取，处理 None 或非数字情况
-                    pe_val = target_row['市盈率-动态'].values[0]
-                    pb_val = target_row['市净率'].values[0]
-                    
-                    res['pe'] = float(pe_val) if pd.notna(pe_val) else None
-                    res['pb'] = float(pb_val) if pd.notna(pb_val) else None
-            except Exception as e:
-                logger.debug(f"[Valuation] 个股 {clean_code} 数据提取失败: {e}")
+        try:
+            df = self._fetch_stock_spot_data()
+            if df is not None and not df.empty:
+                # [修复] 显式检查列是否存在
+                code = ''.join(filter(str.isdigit, str(symbol)))
+                row = df[df['代码'] == code]
+                if not row.empty:
+                    if '市盈率-动态' in df.columns:
+                        res['pe'] = float(row['市盈率-动态'].values[0])
+                    if '市净率' in df.columns:
+                        res['pb'] = float(row['市净率'].values[0])
+        except Exception as e:
+            logger.error(f"[Valuation] 个股 {symbol} 估值获取失败: {e}", exc_info=True)
         return res
 
     def get_growth_rate(self, symbol: str) -> str:
@@ -102,7 +110,7 @@ class ValuationManager:
             
         clean_code = ''.join(filter(str.isdigit, str(symbol)))
         try:
-            with no_proxy_context():
+            with proxy_context():
                 # 使用新浪财务摘要接口 (速度快)
                 df = ak.stock_financial_abstract(symbol=clean_code)
                 
@@ -147,7 +155,11 @@ class ValuationManager:
         if track_index:
             res = self._get_index_valuation(track_index)
         else:
-            res = self._get_stock_valuation(symbol)
+            # [修复] 显式判断是否为指数：sh/sz 开头且长度为6位（如 sh000001）
+            if str(symbol).lower().startswith(("sh", "sz")) and len(str(symbol)) == 6:
+                res = self._get_index_valuation(symbol)
+            else:
+                res = self._get_stock_valuation(symbol)
             
         # [Bugfix] 统一清洗底层的 None 值为 "N/A"
         if res.get('pe') is None: res['pe'] = "N/A"

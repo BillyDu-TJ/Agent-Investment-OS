@@ -8,9 +8,35 @@
 3. 零异常中断 - 所有错误返回标准字典，不抛异常
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+import csv
+from pathlib import Path
 from src.tools.portfolio_manager import PortfolioManager
 from src.tools.market_data import MarketData
+from src.tools.transaction import TransactionManager
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+TRADE_PATH = ROOT_DIR / "data" / "trade_history.csv"
+
+
+def _safe_float(value: Optional[str]) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _load_trade_rows() -> List[Dict[str, Any]]:
+    if not TRADE_PATH.exists():
+        return []
+    rows: List[Dict[str, Any]] = []
+    with TRADE_PATH.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            rows.append(row)
+    return rows
 
 
 def get_current_portfolio(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -41,12 +67,17 @@ def get_current_portfolio(params: Dict[str, Any]) -> Dict[str, Any]:
     try:
         # 先获取市场数据
         market_data = MarketData()
-        market_summaries = market_data.get_market_summary()
-        
-        # 再获取持仓状态
+        summary = market_data.get_market_summary()
+        market_summaries = summary.get("indices", [])
+        print(type(market_summaries), market_summaries)
+
         portfolio_manager = PortfolioManager()
         portfolio_status = portfolio_manager.get_portfolio_status(market_summaries)
-        
+        print(type(portfolio_status), portfolio_status)
+
+        if not isinstance(portfolio_status, dict):
+            return {"status": "error", "message": "Portfolio payload is not a dict"}
+
         return {"status": "success", "data": portfolio_status}
         
     except Exception as e:
@@ -97,10 +128,24 @@ def execute_trade(params: Dict[str, Any]) -> Dict[str, Any]:
         if action not in ["buy", "sell"]:
             return {"status": "error", "message": f"Invalid action: {action}. Must be 'buy' or 'sell'"}
         
-        portfolio_manager = PortfolioManager()
-        result = portfolio_manager.execute_trade(action, symbol, shares, price, reason)
-        
-        return {"status": "success", "data": result}
+        trade_engine = TransactionManager()
+        command = f"/{action} {symbol} {shares} {price}"
+        message = trade_engine.execute_command(command)
+
+        if "✅" in message:
+            return {
+                "status": "success",
+                "data": {
+                    "action": action,
+                    "symbol": symbol,
+                    "shares": shares,
+                    "price": price,
+                    "reason": reason,
+                },
+                "message": message,
+            }
+
+        return {"status": "error", "message": message}
         
     except Exception as e:
         return {"status": "error", "message": f"Failed to execute trade: {str(e)}"}
@@ -131,9 +176,33 @@ def get_trade_history(params: Dict[str, Any]) -> Dict[str, Any]:
         symbol = params.get("symbol")
         limit = params.get("limit", 10)
         
-        portfolio_manager = PortfolioManager()
-        history = portfolio_manager.get_trade_history(symbol=symbol, limit=limit)
-        
+        rows = _load_trade_rows()
+        if symbol:
+            rows = [row for row in rows if str(row.get("Symbol", "")) == str(symbol)]
+
+        try:
+            limit_value = int(limit) if limit is not None else 10
+        except (TypeError, ValueError):
+            limit_value = 10
+
+        if limit_value > 0:
+            rows = rows[-limit_value:]
+
+        history = []
+        for row in rows:
+            history.append(
+                {
+                    "date": row.get("Date"),
+                    "action": row.get("Action"),
+                    "symbol": row.get("Symbol"),
+                    "price": _safe_float(row.get("Price")),
+                    "shares": _safe_float(row.get("Shares")),
+                    "amount": _safe_float(row.get("Amount")),
+                    "realized_pnl": _safe_float(row.get("Realized_PnL")),
+                    "reason": row.get("Reason") or row.get("reason"),
+                }
+            )
+
         return {"status": "success", "data": history}
         
     except Exception as e:
@@ -168,21 +237,27 @@ def get_trade_reasoning(params: Dict[str, Any]) -> Dict[str, Any]:
         
         limit = params.get("limit", 5)
         
-        portfolio_manager = PortfolioManager()
-        history = portfolio_manager.get_trade_history(symbol=symbol, limit=limit)
-        
-        # 提取有 reason 的记录
+        history_result = get_trade_history({"symbol": symbol, "limit": limit})
+        if history_result.get("status") != "success":
+            return history_result
+
         reasoning_records = []
-        for record in history:
-            if record.get("reason"):
-                reasoning_records.append({
-                    "date": record.get("date"),
-                    "action": record.get("action"),
-                    "reason": record.get("reason"),
-                    "shares": record.get("shares"),
-                    "price": record.get("price")
-                })
-        
+        for record in history_result.get("data", []):
+            reason = record.get("reason")
+            if reason:
+                reasoning_records.append(
+                    {
+                        "date": record.get("date"),
+                        "action": record.get("action"),
+                        "reason": reason,
+                        "shares": record.get("shares"),
+                        "price": record.get("price"),
+                    }
+                )
+
+        if not reasoning_records:
+            return {"status": "success", "data": [], "message": "No reason data found"}
+
         return {"status": "success", "data": reasoning_records}
         
     except Exception as e:
