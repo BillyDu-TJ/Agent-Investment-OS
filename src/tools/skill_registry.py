@@ -28,6 +28,8 @@ from src.tools.ledger_skills import (
     get_trade_history,
     get_trade_reasoning
 )
+from src.tools.fundamental_skills import get_financial_summary
+from src.tools.rag_skills import query_master_philosophy
 
 # ============================================================================
 # SKILL_MANIFEST - 技能描述清单（供 AI 理解可用技能）
@@ -128,6 +130,26 @@ SKILL_MANIFEST = {
             "status": "success|error",
             "data": [{"date": "str", "action": "str", "reason": "str"}]
         }
+    },
+    "fundamental_get_summary": {
+        "description": "获取标的的关键财务基本面指标（PE、PB、ROE、营收增速、净利润增速）",
+        "parameters": {
+            "symbol": {"type": "string", "description": "金融标的代码，如 'sh600519', 'us.AAPL'"}
+        },
+        "returns": {
+            "status": "success|error",
+            "data": {"pe": "float|str", "pb": "float|str", "roe": "float|str", "revenue_growth": "float|str", "net_income_growth": "float|str"}
+        }
+    },
+    "rag_query_master": {
+        "description": "条件触发式全量加载，一次性阅读完整的大师投资哲学备忘录内容",
+        "parameters": {
+            "topic": {"type": "string", "description": "可选关键字，如 'cycle', 'debt', 'value'"}
+        },
+        "returns": {
+            "status": "success|error",
+            "data": {"content": "str"}
+        }
     }
 }
 
@@ -144,7 +166,9 @@ SKILL_FUNCTIONS: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
     "ledger_get_portfolio": get_current_portfolio,
     "ledger_execute_trade": execute_trade,
     "ledger_get_trade_history": get_trade_history,
-    "ledger_get_trade_reasoning": get_trade_reasoning
+    "ledger_get_trade_reasoning": get_trade_reasoning,
+    "fundamental_get_summary": get_financial_summary,
+    "rag_query_master": query_master_philosophy
 }
 
 
